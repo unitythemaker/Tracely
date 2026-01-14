@@ -181,8 +181,8 @@ Frontend 5-10 sn interval ile GET endpoint'lerini çağırır. SSE veya WebSocke
 
 ## 14. Rule Actions
 
-| Action | Açıklama |
-|--------|----------|
-| `OPEN_INCIDENT` | Incident oluştur |
-| `QUALITY_ALERT` | Kalite uyarısı |
-| `STREAMING_WARNING` | Streaming uyarısı |
+| Action | Açıklama | Durum |
+|--------|----------|-------|
+| `OPEN_INCIDENT` | Incident oluştur + notification | ✅ v1 |
+| `THROTTLE` | Aynı kural için X dakika sustur (spam önleme) | 🔜 v2 |
+| `WEBHOOK` | Harici sisteme HTTP POST at | 🔜 v2 |

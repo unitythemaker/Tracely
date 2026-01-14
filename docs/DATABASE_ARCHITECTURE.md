@@ -97,8 +97,8 @@ CREATE TYPE rule_operator AS ENUM (
 
 CREATE TYPE rule_action AS ENUM (
     'OPEN_INCIDENT',
-    'QUALITY_ALERT',
-    'STREAMING_WARNING'
+    'THROTTLE',
+    'WEBHOOK'
 );
 
 CREATE TYPE incident_severity AS ENUM (
@@ -305,9 +305,10 @@ INSERT INTO services (id, name) VALUES
     ('S2', 'TV+'),
     ('S3', 'Paycell');
 
--- Quality Rules
+-- Quality Rules (v1: sadece OPEN_INCIDENT aktif)
 INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active) VALUES
     ('QR-01', 'LATENCY_MS', 150.0, '>', 'OPEN_INCIDENT', 1, 'HIGH', TRUE),
-    ('QR-02', 'PACKET_LOSS', 1.5, '>', 'QUALITY_ALERT', 2, 'MEDIUM', TRUE),
-    ('QR-03', 'BUFFER_RATIO', 6.0, '>', 'STREAMING_WARNING', 2, 'MEDIUM', TRUE);
+    ('QR-02', 'PACKET_LOSS', 1.5, '>', 'OPEN_INCIDENT', 2, 'MEDIUM', TRUE),
+    ('QR-03', 'BUFFER_RATIO', 6.0, '>', 'OPEN_INCIDENT', 2, 'MEDIUM', TRUE),
+    ('QR-04', 'ERROR_RATE', 5.0, '>', 'OPEN_INCIDENT', 1, 'CRITICAL', TRUE);
 ```
