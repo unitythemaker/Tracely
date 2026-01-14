@@ -54,6 +54,7 @@ import {
   ArrowUp,
   ArrowDown,
   X,
+  Power,
 } from 'lucide-react';
 
 const severityColors: Record<string, { color: string; priority: number }> = {
@@ -264,7 +265,15 @@ export default function RulesPage() {
   async function toggleActive(rule: Rule) {
     setToggling(rule.id);
     try {
-      await api.updateRule(rule.id, { is_active: !rule.is_active });
+      await api.updateRule(rule.id, {
+        metric_type: rule.metric_type,
+        threshold: rule.threshold,
+        operator: rule.operator,
+        action: rule.action,
+        priority: rule.priority,
+        severity: rule.severity,
+        is_active: !rule.is_active,
+      });
       await fetchRules();
     } catch (error) {
       console.error('Failed to toggle rule:', error);
@@ -559,28 +568,37 @@ export default function RulesPage() {
                     </TableCell>
                     <TableCell className="font-mono">{rule.priority}</TableCell>
                     <TableCell>
-                      <button
-                        onClick={() => toggleActive(rule)}
-                        disabled={toggling === rule.id}
-                        className="flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                      >
-                        {toggling === rule.id ? (
-                          <div className="w-4 h-4 border-2 border-[#00d9ff] border-t-transparent rounded-full animate-spin" />
-                        ) : rule.is_active ? (
-                          <>
-                            <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
-                            <span className="text-sm text-[#10b981] hover:text-[#34d399]">Aktif</span>
-                          </>
-                        ) : (
-                          <>
-                            <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                            <span className="text-sm text-muted-foreground hover:text-foreground">Pasif</span>
-                          </>
-                        )}
-                      </button>
+                      {rule.is_active ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
+                          <span className="text-sm text-[#10b981]">Aktif</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">Pasif</span>
+                        </div>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className={rule.is_active
+                            ? "text-[#10b981] hover:text-[#ff4d6a] hover:bg-[#ff4d6a]/10"
+                            : "text-muted-foreground hover:text-[#10b981] hover:bg-[#10b981]/10"
+                          }
+                          onClick={() => toggleActive(rule)}
+                          disabled={toggling === rule.id}
+                          title={rule.is_active ? "Pasif Yap" : "Aktif Yap"}
+                        >
+                          {toggling === rule.id ? (
+                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                          ) : (
+                            <Power className="w-4 h-4" />
+                          )}
+                        </Button>
                         <Button
                           size="sm"
                           variant="ghost"
