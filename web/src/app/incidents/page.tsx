@@ -438,7 +438,7 @@ export default function IncidentsPage() {
                       <TableCell>
                         <Link
                           href="/rules"
-                          className="font-mono text-sm text-soft hover:text-[#00d9ff] hover:underline"
+                          className="font-mono text-sm text-[#00d9ff] hover:text-[#33e1ff] hover:underline"
                         >
                           {incident.rule_id}
                         </Link>
