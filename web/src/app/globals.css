@@ -213,6 +213,7 @@
 /* Card hover effect */
 .card-hover {
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .card-hover:hover {
@@ -268,6 +269,7 @@
   color: #0c1017;
   font-weight: 600;
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .btn-primary:hover {
@@ -281,6 +283,7 @@
   color: #00d9ff;
   background: rgba(0, 217, 255, 0.05);
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .btn-outline-cyan:hover {
@@ -294,6 +297,7 @@
   color: #10b981;
   background: rgba(16, 185, 129, 0.05);
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .btn-outline-success:hover {
@@ -307,6 +311,7 @@
   color: #ff4d6a;
   background: rgba(255, 77, 106, 0.05);
   transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .btn-outline-danger:hover {
