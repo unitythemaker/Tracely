@@ -263,7 +263,14 @@ export default function RulesPage() {
   }
 
   async function toggleActive(rule: Rule) {
+    const newIsActive = !rule.is_active;
+
+    // Optimistic update
+    setRules((prev) =>
+      prev.map((r) => (r.id === rule.id ? { ...r, is_active: newIsActive } : r))
+    );
     setToggling(rule.id);
+
     try {
       await api.updateRule(rule.id, {
         metric_type: rule.metric_type,
@@ -272,10 +279,13 @@ export default function RulesPage() {
         action: rule.action,
         priority: rule.priority,
         severity: rule.severity,
-        is_active: !rule.is_active,
+        is_active: newIsActive,
       });
-      await fetchRules();
     } catch (error) {
+      // Revert on error
+      setRules((prev) =>
+        prev.map((r) => (r.id === rule.id ? { ...r, is_active: !newIsActive } : r))
+      );
       console.error('Failed to toggle rule:', error);
     } finally {
       setToggling(null);
