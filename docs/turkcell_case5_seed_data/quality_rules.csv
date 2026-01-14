@@ -1,0 +1,4 @@
+rule_id,metric_type,threshold,operator,action,priority,is_active
+QR-01,LATENCY_MS,150.0,>,OPEN_INCIDENT,1,True
+QR-02,PACKET_LOSS,1.5,>,QUALITY_ALERT,2,True
+QR-03,BUFFER_RATIO,6.0,>,STREAMING_WARNING,2,True
