@@ -63,16 +63,6 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Status Footer */}
-      <div className="p-4 border-t border-sidebar-border">
-        <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-[#10b981]/10 border border-[#10b981]/20">
-          <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
-          <div className="flex-1">
-            <p className="text-xs font-medium text-[#10b981]">Sistem Aktif</p>
-            <p className="text-[10px] text-muted-foreground">Tüm servisler çalışıyor</p>
-          </div>
-        </div>
-      </div>
     </aside>
   );
 }
