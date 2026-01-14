@@ -380,6 +380,7 @@ export default function IncidentsPage() {
                       <SortIcon field="service_id" />
                     </div>
                   </TableHead>
+                  <TableHead className="text-muted-foreground">Kural</TableHead>
                   <TableHead className="text-muted-foreground">Mesaj</TableHead>
                   <TableHead
                     className="text-muted-foreground cursor-pointer hover:text-foreground"
@@ -434,6 +435,14 @@ export default function IncidentsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-sm">{incident.service_id}</TableCell>
+                      <TableCell>
+                        <Link
+                          href="/rules"
+                          className="font-mono text-sm text-soft hover:text-[#00d9ff] hover:underline"
+                        >
+                          {incident.rule_id}
+                        </Link>
+                      </TableCell>
                       <TableCell className="max-w-[300px] truncate text-soft">
                         {incident.message}
                       </TableCell>
