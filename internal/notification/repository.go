@@ -3,7 +3,6 @@ package notification
 import (
 	"context"
 
-	"github.com/google/uuid"
 	"github.com/unitythemaker/tracely/internal/db"
 )
 
@@ -34,12 +33,13 @@ func (r *Repository) ListByIncident(ctx context.Context, incidentID string) ([]d
 	return r.q.ListNotificationsByIncident(ctx, incidentID)
 }
 
-func generateNotificationID() string {
-	return "N-" + uuid.New().String()[:8]
-}
-
 func (r *Repository) Create(ctx context.Context, incidentID, target, message string) (*db.Notification, error) {
-	id := generateNotificationID()
+	// Get next ID from sequence
+	id, err := r.q.NextNotificationID(ctx)
+	if err != nil {
+		return nil, err
+	}
+
 	n, err := r.q.CreateNotification(ctx, db.CreateNotificationParams{
 		ID:         id,
 		IncidentID: incidentID,

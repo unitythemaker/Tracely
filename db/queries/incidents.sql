@@ -47,3 +47,6 @@ SELECT COUNT(*) FROM incidents WHERE status != 'CLOSED';
 -- name: CountOpenIncidentsByService :one
 SELECT COUNT(*) FROM incidents
 WHERE service_id = $1 AND status != 'CLOSED';
+
+-- name: NextIncidentID :one
+SELECT CAST('INC-' || nextval('incident_id_seq')::TEXT AS VARCHAR) AS id;

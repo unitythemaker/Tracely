@@ -11,6 +11,11 @@ import (
 	"github.com/unitythemaker/tracely/internal/db"
 )
 
+// NextID gets the next incident ID from the database sequence
+func (r *Repository) NextID(ctx context.Context) (string, error) {
+	return r.q.NextIncidentID(ctx)
+}
+
 type Repository struct {
 	pool *pgxpool.Pool
 	q    *db.Queries
@@ -81,10 +86,6 @@ func (r *Repository) CountOpen(ctx context.Context) (int64, error) {
 	return r.q.CountOpenIncidents(ctx)
 }
 
-func generateIncidentID() string {
-	return "INC-" + uuid.New().String()[:8]
-}
-
 // CreateWithOutbox creates an incident and an outbox event in a single transaction
 func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID string, metricID uuid.UUID, severity db.IncidentSeverity, message string) (*db.Incident, error) {
 	var incident db.Incident
@@ -92,7 +93,11 @@ func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID str
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
 		qtx := r.q.WithTx(tx)
 
-		id := generateIncidentID()
+		// Get next ID from sequence
+		id, err := qtx.NextIncidentID(ctx)
+		if err != nil {
+			return err
+		}
 
 		// Create incident
 		inc, err := qtx.CreateIncident(ctx, db.CreateIncidentParams{

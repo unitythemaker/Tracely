@@ -306,6 +306,17 @@ func (q *Queries) ListOpenIncidents(ctx context.Context, arg ListOpenIncidentsPa
 	return items, nil
 }
 
+const nextIncidentID = `-- name: NextIncidentID :one
+SELECT CAST('INC-' || nextval('incident_id_seq')::TEXT AS VARCHAR) AS id
+`
+
+func (q *Queries) NextIncidentID(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, nextIncidentID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateIncidentStatus = `-- name: UpdateIncidentStatus :one
 UPDATE incidents
 SET status = $2

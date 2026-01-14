@@ -129,3 +129,14 @@ func (q *Queries) ListNotificationsByIncident(ctx context.Context, incidentID st
 	}
 	return items, nil
 }
+
+const nextNotificationID = `-- name: NextNotificationID :one
+SELECT CAST('N-' || nextval('notification_id_seq')::TEXT AS VARCHAR) AS id
+`
+
+func (q *Queries) NextNotificationID(ctx context.Context) (string, error) {
+	row := q.db.QueryRow(ctx, nextNotificationID)
+	var id string
+	err := row.Scan(&id)
+	return id, err
+}

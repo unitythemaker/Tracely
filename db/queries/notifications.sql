@@ -15,3 +15,6 @@ ORDER BY sent_at DESC;
 INSERT INTO notifications (id, incident_id, target, message)
 VALUES ($1, $2, $3, $4)
 RETURNING *;
+
+-- name: NextNotificationID :one
+SELECT CAST('N-' || nextval('notification_id_seq')::TEXT AS VARCHAR) AS id;
