@@ -86,6 +86,7 @@ export default function RulesPage() {
   const [formData, setFormData] = useState<CreateRuleInput>(defaultRule);
   const [saving, setSaving] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<Rule | null>(null);
+  const [toggling, setToggling] = useState<string | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -257,6 +258,18 @@ export default function RulesPage() {
       alert('Kural silinemedi: ' + (error as Error).message);
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function toggleActive(rule: Rule) {
+    setToggling(rule.id);
+    try {
+      await api.updateRule(rule.id, { is_active: !rule.is_active });
+      await fetchRules();
+    } catch (error) {
+      console.error('Failed to toggle rule:', error);
+    } finally {
+      setToggling(null);
     }
   }
 
@@ -546,17 +559,25 @@ export default function RulesPage() {
                     </TableCell>
                     <TableCell className="font-mono">{rule.priority}</TableCell>
                     <TableCell>
-                      {rule.is_active ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
-                          <span className="text-sm text-[#10b981]">Aktif</span>
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">Pasif</span>
-                        </div>
-                      )}
+                      <button
+                        onClick={() => toggleActive(rule)}
+                        disabled={toggling === rule.id}
+                        className="flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                      >
+                        {toggling === rule.id ? (
+                          <div className="w-4 h-4 border-2 border-[#00d9ff] border-t-transparent rounded-full animate-spin" />
+                        ) : rule.is_active ? (
+                          <>
+                            <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
+                            <span className="text-sm text-[#10b981] hover:text-[#34d399]">Aktif</span>
+                          </>
+                        ) : (
+                          <>
+                            <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                            <span className="text-sm text-muted-foreground hover:text-foreground">Pasif</span>
+                          </>
+                        )}
+                      </button>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">

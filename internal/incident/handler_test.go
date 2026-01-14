@@ -363,11 +363,17 @@ func TestIncidentRepository_CreateWithOutbox(t *testing.T) {
 		IsActive:   true,
 	})
 
+	// Create a metric for the foreign key constraint
+	metric := testutil.TestMetric(t, q, testutil.TestMetricParams{
+		ServiceID:  "repo-service",
+		MetricType: db.MetricTypeLATENCYMS,
+		Value:      150.0,
+	})
+
 	repo := NewRepository(pool, q)
 	ctx := context.Background()
 
-	metricID := uuid.New()
-	inc, err := repo.CreateWithOutbox(ctx, "repo-service", "repo-rule", metricID, db.IncidentSeverityCRITICAL, "Test message")
+	inc, err := repo.CreateWithOutbox(ctx, "repo-service", "repo-rule", metric.ID, db.IncidentSeverityCRITICAL, "Test message")
 	if err != nil {
 		t.Fatalf("Failed to create incident with outbox: %v", err)
 	}
