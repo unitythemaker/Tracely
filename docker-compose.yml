@@ -51,6 +51,18 @@ services:
       elasticsearch:
         condition: service_healthy
 
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "http://localhost:8080"
+    container_name: tracely-web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - server
+
 volumes:
   postgres_data:
   elasticsearch_data:

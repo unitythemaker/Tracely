@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,14 +38,29 @@ import {
   RULE_OPERATORS,
   RULE_ACTIONS,
   SEVERITY,
+  METRIC_TYPE_LABELS,
+  RULE_ACTION_LABELS,
+  formatLabel,
 } from '@/lib/api';
-import { SlidersHorizontal, Plus, Pencil, Trash2, AlertTriangle, CheckCircle } from 'lucide-react';
+import {
+  SlidersHorizontal,
+  Plus,
+  Pencil,
+  Trash2,
+  AlertTriangle,
+  CheckCircle,
+  Search,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
+  X,
+} from 'lucide-react';
 
-const severityColors: Record<string, string> = {
-  CRITICAL: '#ff3b5c',
-  HIGH: '#ffb800',
-  MEDIUM: '#00d9ff',
-  LOW: '#6b7a8f',
+const severityColors: Record<string, { color: string; priority: number }> = {
+  CRITICAL: { color: '#ff4d6a', priority: 4 },
+  HIGH: { color: '#ffb800', priority: 3 },
+  MEDIUM: { color: '#00d9ff', priority: 2 },
+  LOW: { color: '#7d8a9d', priority: 1 },
 };
 
 const defaultRule: CreateRuleInput = {
@@ -59,6 +74,9 @@ const defaultRule: CreateRuleInput = {
   is_active: true,
 };
 
+type SortField = 'id' | 'metric_type' | 'threshold' | 'severity' | 'priority' | 'is_active';
+type SortDirection = 'asc' | 'desc';
+
 export default function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -68,6 +86,16 @@ export default function RulesPage() {
   const [formData, setFormData] = useState<CreateRuleInput>(defaultRule);
   const [saving, setSaving] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<Rule | null>(null);
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [metricFilter, setMetricFilter] = useState<string>('all');
+  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+
+  // Sorting
+  const [sortField, setSortField] = useState<SortField>('priority');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   useEffect(() => {
     fetchRules();
@@ -84,6 +112,90 @@ export default function RulesPage() {
       setLoading(false);
     }
   }
+
+  // Filtering and sorting
+  const filteredAndSortedRules = useMemo(() => {
+    let result = [...rules];
+
+    // Apply filters
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      result = result.filter(
+        (r) =>
+          r.id.toLowerCase().includes(query) ||
+          r.metric_type.toLowerCase().includes(query) ||
+          r.action.toLowerCase().includes(query)
+      );
+    }
+    if (metricFilter !== 'all') {
+      result = result.filter((r) => r.metric_type === metricFilter);
+    }
+    if (severityFilter !== 'all') {
+      result = result.filter((r) => r.severity === severityFilter);
+    }
+    if (statusFilter !== 'all') {
+      result = result.filter((r) => (statusFilter === 'active' ? r.is_active : !r.is_active));
+    }
+
+    // Apply sorting
+    result.sort((a, b) => {
+      let comparison = 0;
+
+      switch (sortField) {
+        case 'id':
+          comparison = a.id.localeCompare(b.id);
+          break;
+        case 'metric_type':
+          comparison = a.metric_type.localeCompare(b.metric_type);
+          break;
+        case 'threshold':
+          comparison = a.threshold - b.threshold;
+          break;
+        case 'severity':
+          comparison =
+            (severityColors[a.severity]?.priority || 0) - (severityColors[b.severity]?.priority || 0);
+          break;
+        case 'priority':
+          comparison = a.priority - b.priority;
+          break;
+        case 'is_active':
+          comparison = (a.is_active ? 1 : 0) - (b.is_active ? 1 : 0);
+          break;
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+
+    return result;
+  }, [rules, searchQuery, metricFilter, severityFilter, statusFilter, sortField, sortDirection]);
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection('desc');
+    }
+  }
+
+  function SortIcon({ field }: { field: SortField }) {
+    if (sortField !== field) return <ArrowUpDown className="w-4 h-4 ml-1 opacity-40" />;
+    return sortDirection === 'asc' ? (
+      <ArrowUp className="w-4 h-4 ml-1 text-[#00d9ff]" />
+    ) : (
+      <ArrowDown className="w-4 h-4 ml-1 text-[#00d9ff]" />
+    );
+  }
+
+  function clearFilters() {
+    setSearchQuery('');
+    setMetricFilter('all');
+    setSeverityFilter('all');
+    setStatusFilter('all');
+  }
+
+  const hasActiveFilters =
+    searchQuery || metricFilter !== 'all' || severityFilter !== 'all' || statusFilter !== 'all';
 
   function openCreateDialog() {
     setEditingRule(null);
@@ -149,27 +261,26 @@ export default function RulesPage() {
   }
 
   const activeCount = rules.filter((r) => r.is_active).length;
+  const uniqueMetrics = [...new Set(rules.map((r) => r.metric_type))];
 
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Kurallar</h1>
-          <p className="text-muted-foreground mt-1">Kalite kurallarını yönetin</p>
-        </div>
-        <Button
-          className="bg-[#00d9ff] text-[#0a0e14] hover:bg-[#00d9ff]/90"
-          onClick={openCreateDialog}
-        >
-          <Plus className="w-4 h-4 mr-2" />
-          Yeni Kural
-        </Button>
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Kurallar</h1>
+        <p className="text-muted-foreground mt-1">Kalite kurallarını yönetin</p>
       </div>
 
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-3">
-        <Card className="bg-card border-border card-hover">
+        <Card
+          className={`bg-card border-border card-hover cursor-pointer ${statusFilter === 'all' && !hasActiveFilters ? 'ring-2 ring-[#00d9ff]' : ''}`}
+          onClick={() => {
+            setStatusFilter('all');
+            setMetricFilter('all');
+            setSeverityFilter('all');
+          }}
+        >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
@@ -182,7 +293,10 @@ export default function RulesPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-card border-border card-hover">
+        <Card
+          className={`bg-card border-border card-hover cursor-pointer ${statusFilter === 'active' ? 'ring-2 ring-[#10b981]' : ''}`}
+          onClick={() => setStatusFilter(statusFilter === 'active' ? 'all' : 'active')}
+        >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
@@ -195,7 +309,10 @@ export default function RulesPage() {
             </div>
           </CardContent>
         </Card>
-        <Card className="bg-card border-border card-hover">
+        <Card
+          className={`bg-card border-border card-hover cursor-pointer ${statusFilter === 'inactive' ? 'ring-2 ring-[#7d8a9d]' : ''}`}
+          onClick={() => setStatusFilter(statusFilter === 'inactive' ? 'all' : 'inactive')}
+        >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
@@ -212,49 +329,193 @@ export default function RulesPage() {
         </Card>
       </div>
 
+      {/* Filters */}
+      <Card className="bg-card border-border">
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap items-center gap-4">
+            {/* Search */}
+            <div className="relative flex-1 min-w-[200px] max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="ID, metrik veya aksiyon ara..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 bg-background border-border"
+              />
+            </div>
+
+            {/* Metric Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Metrik:</span>
+              <div className="flex gap-1 flex-wrap">
+                <button
+                  onClick={() => setMetricFilter('all')}
+                  className={`filter-chip ${metricFilter === 'all' ? 'active' : ''}`}
+                >
+                  Tümü
+                </button>
+                {uniqueMetrics.map((metric) => (
+                  <button
+                    key={metric}
+                    onClick={() => setMetricFilter(metric)}
+                    className={`filter-chip ${metricFilter === metric ? 'active' : ''}`}
+                  >
+                    {METRIC_TYPE_LABELS[metric] || formatLabel(metric)}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Severity Filter */}
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground">Önem:</span>
+              <div className="flex gap-1">
+                {['all', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => (
+                  <button
+                    key={sev}
+                    onClick={() => setSeverityFilter(sev)}
+                    className={`filter-chip ${severityFilter === sev ? 'active' : ''}`}
+                    style={
+                      sev !== 'all' && severityFilter === sev
+                        ? {
+                            borderColor: severityColors[sev]?.color,
+                            color: severityColors[sev]?.color,
+                            backgroundColor: `${severityColors[sev]?.color}15`,
+                          }
+                        : {}
+                    }
+                  >
+                    {sev === 'all' ? 'Tümü' : sev}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Clear Filters */}
+            {hasActiveFilters && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearFilters}
+                className="text-muted-foreground hover:text-foreground"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Temizle
+              </Button>
+            )}
+          </div>
+
+          {hasActiveFilters && (
+            <div className="mt-3 text-sm text-muted-foreground">
+              {filteredAndSortedRules.length} sonuç gösteriliyor
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Table */}
       <Card className="bg-card border-border">
         <CardHeader className="border-b border-border">
-          <CardTitle className="flex items-center gap-2">
-            <SlidersHorizontal className="w-5 h-5 text-[#00d9ff]" />
-            Kural Listesi
-          </CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <SlidersHorizontal className="w-5 h-5 text-[#00d9ff]" />
+              Kural Listesi
+            </CardTitle>
+            <Button className="btn-primary" onClick={openCreateDialog}>
+              <Plus className="w-4 h-4 mr-2" />
+              Yeni Kural
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
             <div className="flex items-center justify-center h-32">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00d9ff]" />
             </div>
-          ) : rules.length === 0 ? (
+          ) : filteredAndSortedRules.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <SlidersHorizontal className="w-12 h-12 mx-auto mb-4 opacity-20" />
               <p>Kural bulunamadı</p>
-              <Button variant="outline" className="mt-4" onClick={openCreateDialog}>
-                <Plus className="w-4 h-4 mr-2" />
-                İlk Kuralı Oluştur
-              </Button>
+              {hasActiveFilters ? (
+                <Button variant="link" onClick={clearFilters} className="mt-2 text-[#00d9ff]">
+                  Filtreleri temizle
+                </Button>
+              ) : (
+                <Button variant="outline" className="mt-4" onClick={openCreateDialog}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  İlk Kuralı Oluştur
+                </Button>
+              )}
             </div>
           ) : (
             <Table>
               <TableHeader>
                 <TableRow className="border-border hover:bg-transparent">
-                  <TableHead className="text-muted-foreground">ID</TableHead>
-                  <TableHead className="text-muted-foreground">Metrik</TableHead>
-                  <TableHead className="text-muted-foreground">Koşul</TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('id')}
+                  >
+                    <div className="flex items-center">
+                      ID
+                      <SortIcon field="id" />
+                    </div>
+                  </TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('metric_type')}
+                  >
+                    <div className="flex items-center">
+                      Metrik
+                      <SortIcon field="metric_type" />
+                    </div>
+                  </TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('threshold')}
+                  >
+                    <div className="flex items-center">
+                      Koşul
+                      <SortIcon field="threshold" />
+                    </div>
+                  </TableHead>
                   <TableHead className="text-muted-foreground">Aksiyon</TableHead>
-                  <TableHead className="text-muted-foreground">Önem</TableHead>
-                  <TableHead className="text-muted-foreground">Öncelik</TableHead>
-                  <TableHead className="text-muted-foreground">Durum</TableHead>
-                  <TableHead className="text-muted-foreground text-right">İşlem</TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('severity')}
+                  >
+                    <div className="flex items-center">
+                      Önem
+                      <SortIcon field="severity" />
+                    </div>
+                  </TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('priority')}
+                  >
+                    <div className="flex items-center">
+                      Öncelik
+                      <SortIcon field="priority" />
+                    </div>
+                  </TableHead>
+                  <TableHead
+                    className="text-muted-foreground cursor-pointer hover:text-foreground"
+                    onClick={() => handleSort('is_active')}
+                  >
+                    <div className="flex items-center">
+                      Durum
+                      <SortIcon field="is_active" />
+                    </div>
+                  </TableHead>
+                  <TableHead className="text-muted-foreground text-right"></TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rules.map((rule) => (
+                {filteredAndSortedRules.map((rule) => (
                   <TableRow key={rule.id} className="border-border hover:bg-muted/30">
                     <TableCell className="font-mono text-sm text-[#00d9ff]">{rule.id}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="font-mono">
-                        {rule.metric_type}
+                      <Badge variant="outline" className="font-medium">
+                        {METRIC_TYPE_LABELS[rule.metric_type] || formatLabel(rule.metric_type)}
                       </Badge>
                     </TableCell>
                     <TableCell className="font-mono text-sm">
@@ -262,22 +523,22 @@ export default function RulesPage() {
                     </TableCell>
                     <TableCell>
                       <Badge
-                        className="text-xs"
+                        className="text-xs font-medium"
                         style={{
                           backgroundColor: 'rgba(0, 217, 255, 0.1)',
                           color: '#00d9ff',
                           border: '1px solid rgba(0, 217, 255, 0.3)',
                         }}
                       >
-                        {rule.action}
+                        {RULE_ACTION_LABELS[rule.action] || formatLabel(rule.action)}
                       </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge
                         style={{
-                          backgroundColor: `${severityColors[rule.severity]}15`,
-                          color: severityColors[rule.severity],
-                          border: `1px solid ${severityColors[rule.severity]}30`,
+                          backgroundColor: `${severityColors[rule.severity]?.color}15`,
+                          color: severityColors[rule.severity]?.color,
+                          border: `1px solid ${severityColors[rule.severity]?.color}30`,
                         }}
                       >
                         {rule.severity}
@@ -310,7 +571,7 @@ export default function RulesPage() {
                         <Button
                           size="sm"
                           variant="ghost"
-                          className="text-muted-foreground hover:text-[#ff3b5c]"
+                          className="text-muted-foreground hover:text-[#ff4d6a]"
                           onClick={() => openDeleteDialog(rule)}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -459,11 +720,7 @@ export default function RulesPage() {
             <Button variant="outline" onClick={() => setDialogOpen(false)}>
               İptal
             </Button>
-            <Button
-              className="bg-[#00d9ff] text-[#0a0e14] hover:bg-[#00d9ff]/90"
-              onClick={handleSubmit}
-              disabled={saving}
-            >
+            <Button className="btn-primary" onClick={handleSubmit} disabled={saving}>
               {saving ? (
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
               ) : null}
@@ -477,7 +734,7 @@ export default function RulesPage() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent className="bg-card border-border sm:max-w-[400px]">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-[#ff3b5c]">
+            <DialogTitle className="flex items-center gap-2 text-[#ff4d6a]">
               <AlertTriangle className="w-5 h-5" />
               Kuralı Sil
             </DialogTitle>
@@ -490,11 +747,7 @@ export default function RulesPage() {
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)}>
               İptal
             </Button>
-            <Button
-              className="bg-[#ff3b5c] text-white hover:bg-[#ff3b5c]/90"
-              onClick={handleDelete}
-              disabled={saving}
-            >
+            <Button className="btn-outline-danger" onClick={handleDelete} disabled={saving}>
               {saving ? (
                 <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
               ) : (
