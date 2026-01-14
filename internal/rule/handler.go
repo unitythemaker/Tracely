@@ -4,7 +4,9 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/unitythemaker/tracely/pkg/httputil"
+	"github.com/unitythemaker/tracely/pkg/pgerror"
 )
 
 type Handler struct {
@@ -66,6 +68,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 	rule, err := h.repo.Create(r.Context(), req)
 	if err != nil {
+		if pgerror.IsUniqueViolation(err) {
+			httputil.Conflict(w, "rule with this id already exists")
+			return
+		}
 		slog.Error("failed to create rule", "error", err)
 		httputil.InternalError(w, "failed to create rule")
 		return
@@ -99,6 +105,18 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if id == "" {
 		httputil.BadRequest(w, "missing rule id")
+		return
+	}
+
+	// Check if rule exists first
+	_, err := h.repo.Get(r.Context(), id)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			httputil.NotFound(w, "rule not found")
+			return
+		}
+		slog.Error("failed to get rule", "error", err)
+		httputil.InternalError(w, "failed to delete rule")
 		return
 	}
 

@@ -1,6 +1,8 @@
 module github.com/unitythemaker/tracely
 
-go 1.25.2
+go 1.24.0
+
+toolchain go1.24.10
 
 require (
 	github.com/elastic/go-elasticsearch/v8 v8.19.1

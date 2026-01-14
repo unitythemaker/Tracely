@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -108,8 +109,8 @@ func main() {
 	ruleHandler.RegisterRoutes(mux)
 	incidentHandler.RegisterRoutes(mux)
 
-	// CORS middleware
-	handler := corsMiddleware(mux)
+	// Middleware chain: CORS -> Body limit
+	handler := corsMiddleware(cfg.CORSAllowedOrigins, bodyLimitMiddleware(mux))
 
 	server := &http.Server{
 		Addr:         ":" + cfg.Port,
@@ -163,9 +164,23 @@ func main() {
 	slog.Info("server stopped")
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+func corsMiddleware(allowedOrigins string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+
+		// Check if origin is allowed
+		if allowedOrigins == "*" {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin != "" {
+			// Check if origin matches allowed origins
+			for _, allowed := range splitOrigins(allowedOrigins) {
+				if origin == allowed {
+					w.Header().Set("Access-Control-Allow-Origin", origin)
+					break
+				}
+			}
+		}
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
@@ -174,6 +189,27 @@ func corsMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		next.ServeHTTP(w, r)
+	})
+}
+
+func splitOrigins(origins string) []string {
+	var result []string
+	for _, o := range strings.Split(origins, ",") {
+		if trimmed := strings.TrimSpace(o); trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+const maxBodySize = 1 << 20 // 1 MB
+
+func bodyLimitMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Body != nil {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBodySize)
+		}
 		next.ServeHTTP(w, r)
 	})
 }

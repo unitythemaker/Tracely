@@ -2,13 +2,10 @@ package notification
 
 import (
 	"context"
-	"fmt"
-	"sync/atomic"
 
+	"github.com/google/uuid"
 	"github.com/unitythemaker/tracely/internal/db"
 )
-
-var notificationCounter int64
 
 type Repository struct {
 	q *db.Queries
@@ -38,8 +35,7 @@ func (r *Repository) ListByIncident(ctx context.Context, incidentID string) ([]d
 }
 
 func generateNotificationID() string {
-	n := atomic.AddInt64(&notificationCounter, 1)
-	return fmt.Sprintf("N-%03d", n)
+	return "N-" + uuid.New().String()[:8]
 }
 
 func (r *Repository) Create(ctx context.Context, incidentID, target, message string) (*db.Notification, error) {

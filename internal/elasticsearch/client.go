@@ -112,7 +112,7 @@ func (c *Client) IndexMetric(ctx context.Context, doc MetricDocument) error {
 		c.index,
 		bytes.NewReader(body),
 		c.es.Index.WithDocumentID(doc.ID),
-		c.es.Index.WithRefresh("false"),
+		c.es.Index.WithRefresh("wait_for"),
 	)
 	if err != nil {
 		return err

@@ -53,3 +53,7 @@ func NotFound(w http.ResponseWriter, message string) {
 func InternalError(w http.ResponseWriter, message string) {
 	Error(w, http.StatusInternalServerError, "internal_error", message)
 }
+
+func Conflict(w http.ResponseWriter, message string) {
+	Error(w, http.StatusConflict, "conflict", message)
+}

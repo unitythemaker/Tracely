@@ -9,7 +9,8 @@ FROM outbox o
 LEFT JOIN outbox_processing op ON o.id = op.outbox_id AND op.processor = $1
 WHERE op.outbox_id IS NULL AND o.event_type = $2
 ORDER BY o.created_at
-LIMIT $3;
+LIMIT $3
+FOR UPDATE OF o SKIP LOCKED;
 
 -- name: GetUnprocessedIncidentEvents :many
 SELECT o.*
@@ -17,7 +18,8 @@ FROM outbox o
 LEFT JOIN outbox_processing op ON o.id = op.outbox_id AND op.processor = $1
 WHERE op.outbox_id IS NULL AND o.event_type IN ('INCIDENT_CREATED', 'INCIDENT_UPDATED')
 ORDER BY o.created_at
-LIMIT $2;
+LIMIT $2
+FOR UPDATE OF o SKIP LOCKED;
 
 -- name: MarkEventProcessed :exec
 INSERT INTO outbox_processing (outbox_id, processor)

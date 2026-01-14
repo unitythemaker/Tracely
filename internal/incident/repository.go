@@ -3,8 +3,6 @@ package incident
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,8 +10,6 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/unitythemaker/tracely/internal/db"
 )
-
-var incidentCounter int64
 
 type Repository struct {
 	pool *pgxpool.Pool
@@ -86,8 +82,7 @@ func (r *Repository) CountOpen(ctx context.Context) (int64, error) {
 }
 
 func generateIncidentID() string {
-	n := atomic.AddInt64(&incidentCounter, 1)
-	return fmt.Sprintf("INC-%03d", n)
+	return "INC-" + uuid.New().String()[:8]
 }
 
 // CreateWithOutbox creates an incident and an outbox event in a single transaction
