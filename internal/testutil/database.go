@@ -55,29 +55,27 @@ func GetTestQueries(t *testing.T) *db.Queries {
 	return db.New(pool)
 }
 
-// CleanupTestData cleans up test data from all tables
+// CleanupTestData cleans up test data from all tables using TRUNCATE CASCADE
 func CleanupTestData(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Delete in correct order due to foreign keys
-	tables := []string{
-		"outbox_processing",
-		"outbox",
-		"notifications",
-		"incidents",
-		"metrics",
-		"quality_rules",
-		"services",
-	}
-
-	for _, table := range tables {
-		_, err := pool.Exec(ctx, fmt.Sprintf("DELETE FROM %s", table))
-		if err != nil {
-			t.Logf("Warning: failed to cleanup %s: %v", table, err)
-		}
+	// Use TRUNCATE CASCADE to handle all foreign key dependencies
+	_, err := pool.Exec(ctx, `
+		TRUNCATE TABLE
+			outbox_processing,
+			outbox,
+			notifications,
+			incidents,
+			metrics,
+			quality_rules,
+			services
+		CASCADE
+	`)
+	if err != nil {
+		t.Logf("Warning: failed to truncate tables: %v", err)
 	}
 
 	// Reset sequences

@@ -80,6 +80,9 @@
   --muted: #1e2836;
   --muted-foreground: #7d8a9d;
 
+  /* Soft foreground - readable secondary text */
+  --soft-foreground: #a8b4c4;
+
   /* Warning Amber Accent */
   --accent: #ffb800;
   --accent-foreground: #0c1017;
@@ -361,4 +364,9 @@
   background: rgba(0, 217, 255, 0.15);
   border-color: var(--primary);
   color: var(--primary);
+}
+
+/* Soft text - readable but secondary */
+.text-soft {
+  color: var(--soft-foreground);
 }

@@ -489,7 +489,7 @@ export default function MetricsPage() {
                         {metric.value.toFixed(2)}
                         <span className="text-xs text-muted-foreground ml-1">{config?.unit}</span>
                       </TableCell>
-                      <TableCell className="font-mono text-sm text-muted-foreground">
+                      <TableCell className="font-mono text-sm text-soft">
                         {format(new Date(metric.recorded_at), 'dd MMM HH:mm:ss', {
                           locale: tr,
                         })}

@@ -118,6 +118,7 @@ type TestMetricParams struct {
 }
 
 // TestIncident creates a test incident
+// Note: This will create a metric if MetricID is not provided
 func TestIncident(t *testing.T, q *db.Queries, params TestIncidentParams) db.Incident {
 	t.Helper()
 
@@ -137,9 +138,6 @@ func TestIncident(t *testing.T, q *db.Queries, params TestIncidentParams) db.Inc
 	if params.RuleID == "" {
 		params.RuleID = "test-rule"
 	}
-	if params.MetricID == uuid.Nil {
-		params.MetricID = uuid.New()
-	}
 	if params.Severity == "" {
 		params.Severity = db.IncidentSeverityMEDIUM
 	}
@@ -148,6 +146,20 @@ func TestIncident(t *testing.T, q *db.Queries, params TestIncidentParams) db.Inc
 	}
 	if params.OpenedAt.IsZero() {
 		params.OpenedAt = time.Now()
+	}
+
+	// If no MetricID provided, create a metric first (to satisfy foreign key)
+	if params.MetricID == uuid.Nil {
+		metric, err := q.CreateMetric(ctx, db.CreateMetricParams{
+			ServiceID:  params.ServiceID,
+			MetricType: db.MetricTypeLATENCYMS,
+			Value:      pgutil.Float64ToNumeric(100.0),
+			RecordedAt: time.Now(),
+		})
+		if err != nil {
+			t.Fatalf("Failed to create test metric for incident: %v", err)
+		}
+		params.MetricID = metric.ID
 	}
 
 	incident, err := q.CreateIncident(ctx, db.CreateIncidentParams{

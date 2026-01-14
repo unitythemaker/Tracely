@@ -323,7 +323,7 @@ export default function IncidentDetailPage() {
         <CardContent className="py-4">
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Tetikleyen Metrik ID</span>
-            <span className="font-mono text-sm text-muted-foreground">{incident.metric_id}</span>
+            <span className="font-mono text-sm text-soft">{incident.metric_id}</span>
           </div>
         </CardContent>
       </Card>

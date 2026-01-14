@@ -434,10 +434,10 @@ export default function IncidentsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-sm">{incident.service_id}</TableCell>
-                      <TableCell className="max-w-[300px] truncate text-muted-foreground">
+                      <TableCell className="max-w-[300px] truncate text-soft">
                         {incident.message}
                       </TableCell>
-                      <TableCell className="font-mono text-sm text-muted-foreground">
+                      <TableCell className="font-mono text-sm text-soft">
                         {format(new Date(incident.opened_at), 'dd MMM HH:mm', {
                           locale: tr,
                         })}
