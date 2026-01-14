@@ -593,7 +593,7 @@ export default function RulesPage() {
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Button
-                          size="sm"
+                          size="icon-sm"
                           variant="ghost"
                           className={rule.is_active
                             ? "text-[#10b981] hover:text-[#ff4d6a] hover:bg-[#ff4d6a]/10"
@@ -610,7 +610,7 @@ export default function RulesPage() {
                           )}
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon-sm"
                           variant="ghost"
                           className="text-muted-foreground hover:text-[#00d9ff]"
                           onClick={() => openEditDialog(rule)}
@@ -618,7 +618,7 @@ export default function RulesPage() {
                           <Pencil className="w-4 h-4" />
                         </Button>
                         <Button
-                          size="sm"
+                          size="icon-sm"
                           variant="ghost"
                           className="text-muted-foreground hover:text-[#ff4d6a]"
                           onClick={() => openDeleteDialog(rule)}
