@@ -104,6 +104,7 @@ export interface Rule {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  trigger_count: number;
 }
 
 export interface CreateRuleInput {
@@ -115,6 +116,11 @@ export interface CreateRuleInput {
   priority: number;
   severity: string;
   is_active: boolean;
+}
+
+export interface TopTriggeredRule extends Rule {
+  trigger_count: number;
+  last_triggered_at: string | null;
 }
 
 export interface Incident {
@@ -304,6 +310,7 @@ export const api = {
     }
     return true;
   },
+  getTopTriggeredRules: (limit: number = 10) => fetchAPI<TopTriggeredRule[]>(`/api/rules/stats/top-triggered?limit=${limit}`),
 
   // Incidents
   getIncidents: (params: ListParams = {}) => fetchPaginatedAPI<Incident>('/api/incidents', params),

@@ -57,6 +57,7 @@ import {
   ArrowDown,
   X,
   Power,
+  Zap,
 } from 'lucide-react';
 import { Pagination } from '@/components/ui/pagination';
 import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
@@ -79,7 +80,7 @@ const defaultRule: CreateRuleInput = {
   is_active: true,
 };
 
-type SortField = 'id' | 'metric_type' | 'threshold' | 'severity' | 'priority' | 'is_active';
+type SortField = 'id' | 'metric_type' | 'threshold' | 'severity' | 'priority' | 'trigger_count' | 'is_active';
 type SortDirection = 'asc' | 'desc';
 
 const COLUMNS: ColumnDefinition[] = [
@@ -89,6 +90,7 @@ const COLUMNS: ColumnDefinition[] = [
   { id: 'action', label: 'Aksiyon', defaultVisible: true },
   { id: 'severity', label: 'Önem', defaultVisible: true },
   { id: 'priority', label: 'Öncelik', defaultVisible: true },
+  { id: 'trigger_count', label: 'Tetikleme', defaultVisible: true },
   { id: 'is_active', label: 'Durum', defaultVisible: true },
   { id: 'created_at', label: 'Oluşturulma', defaultVisible: false },
   { id: 'updated_at', label: 'Güncellenme', defaultVisible: false },
@@ -120,7 +122,7 @@ export default function RulesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
   // Sorting
-  const [sortField, setSortField] = useState<SortField>('priority');
+  const [sortField, setSortField] = useState<SortField>('trigger_count');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Pagination
@@ -606,6 +608,17 @@ export default function RulesPage() {
                         </div>
                       </TableHead>
                     )}
+                    {isColumnVisible('trigger_count') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('trigger_count')}
+                      >
+                        <div className="flex items-center">
+                          Tetikleme
+                          <SortIcon field="trigger_count" />
+                        </div>
+                      </TableHead>
+                    )}
                     {isColumnVisible('is_active') && (
                       <TableHead
                         className="text-muted-foreground cursor-pointer hover:text-foreground"
@@ -673,6 +686,16 @@ export default function RulesPage() {
                       )}
                       {isColumnVisible('priority') && (
                         <TableCell className="font-mono">{rule.priority}</TableCell>
+                      )}
+                      {isColumnVisible('trigger_count') && (
+                        <TableCell>
+                          <div className="flex items-center gap-1.5">
+                            <Zap className="w-4 h-4 text-[#ffb800]" />
+                            <span className="font-mono font-medium text-[#ffb800]">
+                              {rule.trigger_count}
+                            </span>
+                          </div>
+                        </TableCell>
                       )}
                       {isColumnVisible('is_active') && (
                         <TableCell>

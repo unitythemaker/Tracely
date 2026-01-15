@@ -7,6 +7,7 @@ package db
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -115,6 +116,75 @@ func (q *Queries) GetRule(ctx context.Context, id string) (QualityRule, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getTopTriggeredRules = `-- name: GetTopTriggeredRules :many
+SELECT
+  r.id,
+  r.metric_type,
+  r.threshold,
+  r.operator,
+  r.action,
+  r.priority,
+  r.severity,
+  r.is_active,
+  r.created_at,
+  r.updated_at,
+  COUNT(i.id)::int AS trigger_count,
+  MAX(i.opened_at) AS last_triggered_at
+FROM quality_rules r
+LEFT JOIN incidents i ON r.id = i.rule_id
+GROUP BY r.id
+ORDER BY COUNT(i.id) DESC, r.priority ASC
+LIMIT $1
+`
+
+type GetTopTriggeredRulesRow struct {
+	ID              string           `json:"id"`
+	MetricType      MetricType       `json:"metric_type"`
+	Threshold       pgtype.Numeric   `json:"threshold"`
+	Operator        RuleOperator     `json:"operator"`
+	Action          RuleAction       `json:"action"`
+	Priority        int32            `json:"priority"`
+	Severity        IncidentSeverity `json:"severity"`
+	IsActive        bool             `json:"is_active"`
+	CreatedAt       time.Time        `json:"created_at"`
+	UpdatedAt       time.Time        `json:"updated_at"`
+	TriggerCount    int32            `json:"trigger_count"`
+	LastTriggeredAt interface{}      `json:"last_triggered_at"`
+}
+
+func (q *Queries) GetTopTriggeredRules(ctx context.Context, limit int32) ([]GetTopTriggeredRulesRow, error) {
+	rows, err := q.db.Query(ctx, getTopTriggeredRules, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetTopTriggeredRulesRow{}
+	for rows.Next() {
+		var i GetTopTriggeredRulesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MetricType,
+			&i.Threshold,
+			&i.Operator,
+			&i.Action,
+			&i.Priority,
+			&i.Severity,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TriggerCount,
+			&i.LastTriggeredAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listActiveRules = `-- name: ListActiveRules :many
@@ -227,29 +297,39 @@ func (q *Queries) ListRules(ctx context.Context) ([]QualityRule, error) {
 }
 
 const listRulesFiltered = `-- name: ListRulesFiltered :many
-SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules
+SELECT
+  r.id, r.metric_type, r.threshold, r.operator, r.action, r.priority, r.severity, r.is_active, r.created_at, r.updated_at,
+  COALESCE(tc.trigger_count, 0)::int AS trigger_count
+FROM quality_rules r
+LEFT JOIN (
+  SELECT rule_id, COUNT(*)::int AS trigger_count
+  FROM incidents
+  GROUP BY rule_id
+) tc ON r.id = tc.rule_id
 WHERE
-  ($1::metric_type IS NULL OR metric_type = $1)
-  AND ($2::incident_severity IS NULL OR severity = $2)
-  AND ($3::boolean IS NULL OR is_active = $3)
+  ($1::metric_type IS NULL OR r.metric_type = $1)
+  AND ($2::incident_severity IS NULL OR r.severity = $2)
+  AND ($3::boolean IS NULL OR r.is_active = $3)
   AND ($4::text IS NULL OR (
-    id ILIKE '%' || $4 || '%'
-    OR CAST(threshold AS TEXT) ILIKE '%' || $4 || '%'
+    r.id ILIKE '%' || $4 || '%'
+    OR CAST(r.threshold AS TEXT) ILIKE '%' || $4 || '%'
   ))
 ORDER BY
-  CASE WHEN $5::text = 'id' AND $6::text = 'asc' THEN id END ASC,
-  CASE WHEN $5::text = 'id' AND $6::text = 'desc' THEN id END DESC,
-  CASE WHEN $5::text = 'metric_type' AND $6::text = 'asc' THEN metric_type END ASC,
-  CASE WHEN $5::text = 'metric_type' AND $6::text = 'desc' THEN metric_type END DESC,
-  CASE WHEN $5::text = 'threshold' AND $6::text = 'asc' THEN threshold END ASC,
-  CASE WHEN $5::text = 'threshold' AND $6::text = 'desc' THEN threshold END DESC,
-  CASE WHEN $5::text = 'severity' AND $6::text = 'asc' THEN severity END ASC,
-  CASE WHEN $5::text = 'severity' AND $6::text = 'desc' THEN severity END DESC,
-  CASE WHEN $5::text = 'priority' AND $6::text = 'asc' THEN priority END ASC,
-  CASE WHEN $5::text = 'priority' AND $6::text = 'desc' THEN priority END DESC,
-  CASE WHEN $5::text = 'is_active' AND $6::text = 'asc' THEN is_active END ASC,
-  CASE WHEN $5::text = 'is_active' AND $6::text = 'desc' THEN is_active END DESC,
-  priority ASC, id ASC
+  CASE WHEN $5::text = 'id' AND $6::text = 'asc' THEN r.id END ASC,
+  CASE WHEN $5::text = 'id' AND $6::text = 'desc' THEN r.id END DESC,
+  CASE WHEN $5::text = 'metric_type' AND $6::text = 'asc' THEN r.metric_type END ASC,
+  CASE WHEN $5::text = 'metric_type' AND $6::text = 'desc' THEN r.metric_type END DESC,
+  CASE WHEN $5::text = 'threshold' AND $6::text = 'asc' THEN r.threshold END ASC,
+  CASE WHEN $5::text = 'threshold' AND $6::text = 'desc' THEN r.threshold END DESC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'asc' THEN r.severity END ASC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'desc' THEN r.severity END DESC,
+  CASE WHEN $5::text = 'priority' AND $6::text = 'asc' THEN r.priority END ASC,
+  CASE WHEN $5::text = 'priority' AND $6::text = 'desc' THEN r.priority END DESC,
+  CASE WHEN $5::text = 'is_active' AND $6::text = 'asc' THEN r.is_active END ASC,
+  CASE WHEN $5::text = 'is_active' AND $6::text = 'desc' THEN r.is_active END DESC,
+  CASE WHEN $5::text = 'trigger_count' AND $6::text = 'asc' THEN COALESCE(tc.trigger_count, 0) END ASC,
+  CASE WHEN $5::text = 'trigger_count' AND $6::text = 'desc' THEN COALESCE(tc.trigger_count, 0) END DESC,
+  r.priority ASC, r.id ASC
 LIMIT $8 OFFSET $7
 `
 
@@ -264,7 +344,21 @@ type ListRulesFilteredParams struct {
 	LimitVal         int32                `json:"limit_val"`
 }
 
-func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredParams) ([]QualityRule, error) {
+type ListRulesFilteredRow struct {
+	ID           string           `json:"id"`
+	MetricType   MetricType       `json:"metric_type"`
+	Threshold    pgtype.Numeric   `json:"threshold"`
+	Operator     RuleOperator     `json:"operator"`
+	Action       RuleAction       `json:"action"`
+	Priority     int32            `json:"priority"`
+	Severity     IncidentSeverity `json:"severity"`
+	IsActive     bool             `json:"is_active"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	TriggerCount int32            `json:"trigger_count"`
+}
+
+func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredParams) ([]ListRulesFilteredRow, error) {
 	rows, err := q.db.Query(ctx, listRulesFiltered,
 		arg.FilterMetricType,
 		arg.FilterSeverity,
@@ -279,9 +373,9 @@ func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredPa
 		return nil, err
 	}
 	defer rows.Close()
-	items := []QualityRule{}
+	items := []ListRulesFilteredRow{}
 	for rows.Next() {
-		var i QualityRule
+		var i ListRulesFilteredRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.MetricType,
@@ -293,6 +387,7 @@ func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredPa
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TriggerCount,
 		); err != nil {
 			return nil, err
 		}

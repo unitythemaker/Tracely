@@ -46,7 +46,7 @@ type RuleListFilteredParams struct {
 	Offset     int32
 }
 
-func (r *Repository) ListFiltered(ctx context.Context, params RuleListFilteredParams) ([]db.QualityRule, int, error) {
+func (r *Repository) ListFiltered(ctx context.Context, params RuleListFilteredParams) ([]db.ListRulesFilteredRow, int, error) {
 	filterParams := db.ListRulesFilteredParams{
 		LimitVal:  params.Limit,
 		OffsetVal: params.Offset,
@@ -139,4 +139,8 @@ func (r *Repository) SetActive(ctx context.Context, id string, active bool) (*db
 
 func (r *Repository) Delete(ctx context.Context, id string) error {
 	return r.q.DeleteRule(ctx, id)
+}
+
+func (r *Repository) GetTopTriggered(ctx context.Context, limit int32) ([]db.GetTopTriggeredRulesRow, error) {
+	return r.q.GetTopTriggeredRules(ctx, limit)
 }

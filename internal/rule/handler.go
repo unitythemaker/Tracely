@@ -21,6 +21,7 @@ func NewHandler(repo *Repository) *Handler {
 
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/rules", h.List)
+	mux.HandleFunc("GET /api/rules/stats/top-triggered", h.TopTriggered)
 	mux.HandleFunc("GET /api/rules/{id}", h.Get)
 	mux.HandleFunc("POST /api/rules", h.Create)
 	mux.HandleFunc("PATCH /api/rules/{id}", h.Update)
@@ -81,7 +82,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputil.SuccessPaginated(w, ToResponseList(rules), total, limit, offset)
+	httputil.SuccessPaginated(w, ToFilteredResponseList(rules), total, limit, offset)
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
@@ -175,4 +176,22 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.NoContent(w)
+}
+
+func (h *Handler) TopTriggered(w http.ResponseWriter, r *http.Request) {
+	query := r.URL.Query()
+
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit <= 0 || limit > 50 {
+		limit = 10
+	}
+
+	rows, err := h.repo.GetTopTriggered(r.Context(), int32(limit))
+	if err != nil {
+		slog.Error("failed to get top triggered rules", "error", err)
+		httputil.InternalError(w, "failed to get top triggered rules")
+		return
+	}
+
+	httputil.Success(w, ToTopTriggeredResponseList(rows))
 }

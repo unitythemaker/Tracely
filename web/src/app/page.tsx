@@ -11,8 +11,10 @@ import {
   Incident,
   Metric,
   AggregatedMetric,
+  TopTriggeredRule,
   INCIDENT_STATUS,
   METRIC_TYPE_LABELS,
+  RULE_OPERATORS,
   formatLabel,
   PaginationMeta,
 } from '@/lib/api';
@@ -27,6 +29,8 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  SlidersHorizontal,
+  Zap,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -163,6 +167,7 @@ export default function Dashboard() {
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [metrics, setMetrics] = useState<Metric[]>([]);
   const [chartData, setChartData] = useState<AggregatedMetric[]>([]);
+  const [topTriggeredRules, setTopTriggeredRules] = useState<TopTriggeredRule[]>([]);
   const [metricsMeta, setMetricsMeta] = useState<PaginationMeta>({ total: 0, limit: 100, offset: 0 });
   const [loading, setLoading] = useState(true);
   const [chartLoading, setChartLoading] = useState(true);
@@ -196,15 +201,17 @@ export default function Dashboard() {
   useEffect(() => {
     async function fetchData() {
       try {
-        const [servicesRes, incidentsRes, metricsRes] = await Promise.all([
+        const [servicesRes, incidentsRes, metricsRes, topRulesRes] = await Promise.all([
           api.getServices({ limit: 100 }),
           api.getIncidents({ limit: 20 }),
           api.getMetrics({ limit: 100, sort_by: 'recorded_at', sort_dir: 'desc' }),
+          api.getTopTriggeredRules(5),
         ]);
         setServices(servicesRes.data || []);
         setIncidents(incidentsRes.data || []);
         setMetrics(metricsRes.data || []);
         setMetricsMeta(metricsRes.meta);
+        setTopTriggeredRules(topRulesRes || []);
       } catch (error) {
         console.error('Failed to fetch data:', error);
       } finally {
@@ -537,6 +544,102 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Top Triggered Rules */}
+      <Card className="bg-card border-border">
+        <CardHeader className="border-b border-border">
+          <CardTitle className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Zap className="w-5 h-5 text-[#ffb800]" />
+              En Sık Tetiklenen Kurallar
+            </div>
+            <Link href="/rules">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-[#00d9ff]">
+                Tümünü Gör
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </Link>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {topTriggeredRules.length > 0 ? (
+            <div className="space-y-3">
+              {topTriggeredRules.map((rule, index) => {
+                const config = metricTypeConfig[rule.metric_type] || { color: '#00d9ff', unit: '' };
+                const severity = severityConfig[rule.severity] || severityConfig.LOW;
+                const operatorLabel = Object.entries(RULE_OPERATORS).find(([, v]) => v === rule.operator)?.[0] || rule.operator;
+
+                return (
+                  <div
+                    key={rule.id}
+                    className="flex items-center justify-between p-3 rounded-lg border border-border hover:border-[#00d9ff]/30 transition-colors"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-[#ffb800]/10 text-[#ffb800] font-bold text-sm">
+                        {index + 1}
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-mono text-sm text-[#00d9ff]">{rule.id}</span>
+                          <Badge
+                            className="text-xs"
+                            style={{
+                              backgroundColor: severity.bgColor,
+                              color: severity.color,
+                              border: `1px solid ${severity.color}30`,
+                            }}
+                          >
+                            {rule.severity}
+                          </Badge>
+                          {!rule.is_active && (
+                            <Badge variant="outline" className="text-xs text-muted-foreground">
+                              Pasif
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <Badge
+                            className="text-xs font-medium"
+                            style={{
+                              backgroundColor: `${config.color}15`,
+                              color: config.color,
+                              border: `1px solid ${config.color}30`,
+                            }}
+                          >
+                            {METRIC_TYPE_LABELS[rule.metric_type] || formatLabel(rule.metric_type)}
+                          </Badge>
+                          <span className="font-mono">
+                            {operatorLabel} {rule.threshold}
+                            <span className="text-xs ml-1">{config.unit}</span>
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-[#ffb800]" />
+                        <span className="text-lg font-bold text-[#ffb800]">{rule.trigger_count}</span>
+                        <span className="text-sm text-muted-foreground">tetikleme</span>
+                      </div>
+                      {rule.last_triggered_at && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Son: {format(new Date(rule.last_triggered_at), 'dd/MM HH:mm', { locale: tr })}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <SlidersHorizontal className="w-12 h-12 mx-auto mb-4 opacity-20" />
+              <p className="text-muted-foreground">Henüz tetikleme yok</p>
+              <p className="text-xs text-muted-foreground mt-1">Kurallar henüz tetiklenmedi</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Metrics List with Expand */}
       <Card className="bg-card border-border">
