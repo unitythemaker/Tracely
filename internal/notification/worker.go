@@ -63,12 +63,13 @@ func (w *Worker) processEvents(ctx context.Context) {
 }
 
 type IncidentPayload struct {
-	ID        string `json:"id"`
-	ServiceID string `json:"service_id"`
-	RuleID    string `json:"rule_id"`
-	Severity  string `json:"severity"`
-	Status    string `json:"status"`
-	Message   string `json:"message"`
+	ID           string  `json:"id"`
+	ServiceID    string  `json:"service_id"`
+	RuleID       string  `json:"rule_id"`
+	Severity     string  `json:"severity"`
+	Status       string  `json:"status"`
+	Message      string  `json:"message"`
+	DepartmentID *string `json:"department_id,omitempty"`
 }
 
 func (w *Worker) processEvent(ctx context.Context, event db.Outbox) error {
@@ -79,21 +80,37 @@ func (w *Worker) processEvent(ctx context.Context, event db.Outbox) error {
 
 	// Create notification (mock - just log and store)
 	target := "OPS_TEAM"
+	if payload.DepartmentID != nil {
+		target = *payload.DepartmentID
+	}
+
 	message := fmt.Sprintf("[%s] Incident %s: %s (Service: %s)",
 		payload.Severity, payload.ID, payload.Message, payload.ServiceID)
 
-	// In a real system, this would send to Slack, email, SMS, etc.
-	slog.Info("NotificationWorker: sending notification",
-		"target", target,
-		"incident_id", payload.ID,
-		"severity", payload.Severity,
-	)
+	// Mock notification function
+	sendMockNotification(target, message, payload.ID, payload.Severity)
 
 	// Store notification record
-	_, err := w.notifRepo.Create(ctx, payload.ID, target, message)
+	_, err := w.notifRepo.Create(ctx, payload.ID, target, message, payload.DepartmentID)
 	if err != nil {
 		return fmt.Errorf("failed to create notification: %w", err)
 	}
 
 	return nil
+}
+
+// sendMockNotification is a mock function that simulates sending notifications
+// In a real system, this could send to email, Slack, SMS, etc.
+func sendMockNotification(target, message, incidentID, severity string) {
+	slog.Info("MOCK NOTIFICATION",
+		"target", target,
+		"incident_id", incidentID,
+		"severity", severity,
+		"message", message,
+		"channel", "email", // Could be configurable: email, slack, sms, etc.
+	)
+	// Here you could add logic for different notification channels:
+	// - sendEmail(target, message)
+	// - sendSlackMessage(target, message)
+	// - sendSMS(target, message)
 }

@@ -73,7 +73,8 @@ func CleanupTestData(t *testing.T, pool *pgxpool.Pool) {
 			incidents,
 			metrics,
 			quality_rules,
-			services
+			services,
+			departments
 		CASCADE
 	`)
 	if err != nil {

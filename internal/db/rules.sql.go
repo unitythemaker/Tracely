@@ -44,20 +44,21 @@ func (q *Queries) CountRulesFiltered(ctx context.Context, arg CountRulesFiltered
 }
 
 const createRule = `-- name: CreateRule :one
-INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at
+INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active, department_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id
 `
 
 type CreateRuleParams struct {
-	ID         string           `json:"id"`
-	MetricType MetricType       `json:"metric_type"`
-	Threshold  pgtype.Numeric   `json:"threshold"`
-	Operator   RuleOperator     `json:"operator"`
-	Action     RuleAction       `json:"action"`
-	Priority   int32            `json:"priority"`
-	Severity   IncidentSeverity `json:"severity"`
-	IsActive   bool             `json:"is_active"`
+	ID           string           `json:"id"`
+	MetricType   MetricType       `json:"metric_type"`
+	Threshold    pgtype.Numeric   `json:"threshold"`
+	Operator     RuleOperator     `json:"operator"`
+	Action       RuleAction       `json:"action"`
+	Priority     int32            `json:"priority"`
+	Severity     IncidentSeverity `json:"severity"`
+	IsActive     bool             `json:"is_active"`
+	DepartmentID *string          `json:"department_id"`
 }
 
 func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (QualityRule, error) {
@@ -70,6 +71,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (Quality
 		arg.Priority,
 		arg.Severity,
 		arg.IsActive,
+		arg.DepartmentID,
 	)
 	var i QualityRule
 	err := row.Scan(
@@ -83,6 +85,7 @@ func (q *Queries) CreateRule(ctx context.Context, arg CreateRuleParams) (Quality
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DepartmentID,
 	)
 	return i, err
 }
@@ -97,7 +100,7 @@ func (q *Queries) DeleteRule(ctx context.Context, id string) error {
 }
 
 const getRule = `-- name: GetRule :one
-SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules WHERE id = $1
+SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id FROM quality_rules WHERE id = $1
 `
 
 func (q *Queries) GetRule(ctx context.Context, id string) (QualityRule, error) {
@@ -114,6 +117,7 @@ func (q *Queries) GetRule(ctx context.Context, id string) (QualityRule, error) {
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DepartmentID,
 	)
 	return i, err
 }
@@ -128,6 +132,7 @@ SELECT
   r.priority,
   r.severity,
   r.is_active,
+  r.department_id,
   r.created_at,
   r.updated_at,
   COUNT(i.id)::int AS trigger_count,
@@ -148,6 +153,7 @@ type GetTopTriggeredRulesRow struct {
 	Priority        int32            `json:"priority"`
 	Severity        IncidentSeverity `json:"severity"`
 	IsActive        bool             `json:"is_active"`
+	DepartmentID    *string          `json:"department_id"`
 	CreatedAt       time.Time        `json:"created_at"`
 	UpdatedAt       time.Time        `json:"updated_at"`
 	TriggerCount    int32            `json:"trigger_count"`
@@ -172,6 +178,7 @@ func (q *Queries) GetTopTriggeredRules(ctx context.Context, limit int32) ([]GetT
 			&i.Priority,
 			&i.Severity,
 			&i.IsActive,
+			&i.DepartmentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.TriggerCount,
@@ -188,7 +195,7 @@ func (q *Queries) GetTopTriggeredRules(ctx context.Context, limit int32) ([]GetT
 }
 
 const listActiveRules = `-- name: ListActiveRules :many
-SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules
+SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id FROM quality_rules
 WHERE is_active = TRUE
 ORDER BY priority, id
 `
@@ -213,6 +220,7 @@ func (q *Queries) ListActiveRules(ctx context.Context) ([]QualityRule, error) {
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DepartmentID,
 		); err != nil {
 			return nil, err
 		}
@@ -225,7 +233,7 @@ func (q *Queries) ListActiveRules(ctx context.Context) ([]QualityRule, error) {
 }
 
 const listActiveRulesByMetricType = `-- name: ListActiveRulesByMetricType :many
-SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules
+SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id FROM quality_rules
 WHERE is_active = TRUE AND metric_type = $1
 ORDER BY priority, id
 `
@@ -250,6 +258,7 @@ func (q *Queries) ListActiveRulesByMetricType(ctx context.Context, metricType Me
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DepartmentID,
 		); err != nil {
 			return nil, err
 		}
@@ -262,7 +271,7 @@ func (q *Queries) ListActiveRulesByMetricType(ctx context.Context, metricType Me
 }
 
 const listRules = `-- name: ListRules :many
-SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules ORDER BY priority, id
+SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id FROM quality_rules ORDER BY priority, id
 `
 
 func (q *Queries) ListRules(ctx context.Context) ([]QualityRule, error) {
@@ -285,6 +294,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]QualityRule, error) {
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DepartmentID,
 		); err != nil {
 			return nil, err
 		}
@@ -298,7 +308,7 @@ func (q *Queries) ListRules(ctx context.Context) ([]QualityRule, error) {
 
 const listRulesFiltered = `-- name: ListRulesFiltered :many
 SELECT
-  r.id, r.metric_type, r.threshold, r.operator, r.action, r.priority, r.severity, r.is_active, r.created_at, r.updated_at,
+  r.id, r.metric_type, r.threshold, r.operator, r.action, r.priority, r.severity, r.is_active, r.created_at, r.updated_at, r.department_id,
   COALESCE(tc.trigger_count, 0)::int AS trigger_count
 FROM quality_rules r
 LEFT JOIN (
@@ -355,6 +365,7 @@ type ListRulesFilteredRow struct {
 	IsActive     bool             `json:"is_active"`
 	CreatedAt    time.Time        `json:"created_at"`
 	UpdatedAt    time.Time        `json:"updated_at"`
+	DepartmentID *string          `json:"department_id"`
 	TriggerCount int32            `json:"trigger_count"`
 }
 
@@ -387,6 +398,7 @@ func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredPa
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DepartmentID,
 			&i.TriggerCount,
 		); err != nil {
 			return nil, err
@@ -403,7 +415,7 @@ const setRuleActive = `-- name: SetRuleActive :one
 UPDATE quality_rules
 SET is_active = $2
 WHERE id = $1
-RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at
+RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id
 `
 
 type SetRuleActiveParams struct {
@@ -425,26 +437,28 @@ func (q *Queries) SetRuleActive(ctx context.Context, arg SetRuleActiveParams) (Q
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DepartmentID,
 	)
 	return i, err
 }
 
 const updateRule = `-- name: UpdateRule :one
 UPDATE quality_rules
-SET metric_type = $2, threshold = $3, operator = $4, action = $5, priority = $6, severity = $7, is_active = $8
+SET metric_type = $2, threshold = $3, operator = $4, action = $5, priority = $6, severity = $7, is_active = $8, department_id = $9
 WHERE id = $1
-RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at
+RETURNING id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at, department_id
 `
 
 type UpdateRuleParams struct {
-	ID         string           `json:"id"`
-	MetricType MetricType       `json:"metric_type"`
-	Threshold  pgtype.Numeric   `json:"threshold"`
-	Operator   RuleOperator     `json:"operator"`
-	Action     RuleAction       `json:"action"`
-	Priority   int32            `json:"priority"`
-	Severity   IncidentSeverity `json:"severity"`
-	IsActive   bool             `json:"is_active"`
+	ID           string           `json:"id"`
+	MetricType   MetricType       `json:"metric_type"`
+	Threshold    pgtype.Numeric   `json:"threshold"`
+	Operator     RuleOperator     `json:"operator"`
+	Action       RuleAction       `json:"action"`
+	Priority     int32            `json:"priority"`
+	Severity     IncidentSeverity `json:"severity"`
+	IsActive     bool             `json:"is_active"`
+	DepartmentID *string          `json:"department_id"`
 }
 
 func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (QualityRule, error) {
@@ -457,6 +471,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (Quality
 		arg.Priority,
 		arg.Severity,
 		arg.IsActive,
+		arg.DepartmentID,
 	)
 	var i QualityRule
 	err := row.Scan(
@@ -470,6 +485,7 @@ func (q *Queries) UpdateRule(ctx context.Context, arg UpdateRuleParams) (Quality
 		&i.IsActive,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DepartmentID,
 	)
 	return i, err
 }

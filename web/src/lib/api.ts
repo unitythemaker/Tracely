@@ -93,6 +93,14 @@ export interface ChartParams {
   bucket?: 'minute' | 'hour' | 'day';
 }
 
+export interface Department {
+  id: string;
+  name: string;
+  description?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Rule {
   id: string;
   metric_type: string;
@@ -102,6 +110,7 @@ export interface Rule {
   priority: number;
   severity: string;
   is_active: boolean;
+  department_id?: string;
   created_at: string;
   updated_at: string;
   trigger_count: number;
@@ -116,6 +125,7 @@ export interface CreateRuleInput {
   priority: number;
   severity: string;
   is_active: boolean;
+  department_id?: string;
 }
 
 export interface TopTriggeredRule extends Rule {
@@ -162,6 +172,7 @@ export interface Notification {
   incident_id: string;
   target: string;
   message: string;
+  department_id?: string;
   is_read: boolean;
   sent_at: string;
   created_at: string;
@@ -237,6 +248,44 @@ export function formatLabel(value: string): string {
 
 // API functions
 export const api = {
+  // Departments
+  getDepartments: () => fetchAPI<Department[]>('/api/departments'),
+  getDepartment: (id: string) => fetchAPI<Department>(`/api/departments/${id}`),
+  createDepartment: async (data: { id: string; name: string; description?: string }) => {
+    const res = await fetch(`${API_BASE}/api/departments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  updateDepartment: async (id: string, data: { name: string; description?: string }) => {
+    const res = await fetch(`${API_BASE}/api/departments/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  deleteDepartment: async (id: string) => {
+    const res = await fetch(`${API_BASE}/api/departments/${id}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+
   // Services
   getServices: (params: ListParams = {}) => fetchPaginatedAPI<Service>('/api/services', params),
   getService: (id: string) => fetchAPI<Service>(`/api/services/${id}`),

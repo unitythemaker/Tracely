@@ -8,24 +8,26 @@ import (
 )
 
 type CreateRuleRequest struct {
-	ID         string  `json:"id"`
-	MetricType string  `json:"metric_type"`
-	Threshold  float64 `json:"threshold"`
-	Operator   string  `json:"operator"`
-	Action     string  `json:"action"`
-	Priority   int32   `json:"priority"`
-	Severity   string  `json:"severity"`
-	IsActive   bool    `json:"is_active"`
+	ID           string  `json:"id"`
+	MetricType   string  `json:"metric_type"`
+	Threshold    float64 `json:"threshold"`
+	Operator     string  `json:"operator"`
+	Action       string  `json:"action"`
+	Priority     int32   `json:"priority"`
+	Severity     string  `json:"severity"`
+	IsActive     bool    `json:"is_active"`
+	DepartmentID *string `json:"department_id,omitempty"`
 }
 
 type UpdateRuleRequest struct {
-	MetricType string  `json:"metric_type"`
-	Threshold  float64 `json:"threshold"`
-	Operator   string  `json:"operator"`
-	Action     string  `json:"action"`
-	Priority   int32   `json:"priority"`
-	Severity   string  `json:"severity"`
-	IsActive   bool    `json:"is_active"`
+	MetricType   string  `json:"metric_type"`
+	Threshold    float64 `json:"threshold"`
+	Operator     string  `json:"operator"`
+	Action       string  `json:"action"`
+	Priority     int32   `json:"priority"`
+	Severity     string  `json:"severity"`
+	IsActive     bool    `json:"is_active"`
+	DepartmentID *string `json:"department_id,omitempty"`
 }
 
 type RuleResponse struct {
@@ -37,6 +39,7 @@ type RuleResponse struct {
 	Priority     int32     `json:"priority"`
 	Severity     string    `json:"severity"`
 	IsActive     bool      `json:"is_active"`
+	DepartmentID *string   `json:"department_id,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 	TriggerCount int32     `json:"trigger_count"`
@@ -44,16 +47,17 @@ type RuleResponse struct {
 
 func ToResponse(r *db.QualityRule) RuleResponse {
 	return RuleResponse{
-		ID:         r.ID,
-		MetricType: string(r.MetricType),
-		Threshold:  pgutil.NumericToFloat64(r.Threshold),
-		Operator:   string(r.Operator),
-		Action:     string(r.Action),
-		Priority:   r.Priority,
-		Severity:   string(r.Severity),
-		IsActive:   r.IsActive,
-		CreatedAt:  r.CreatedAt,
-		UpdatedAt:  r.UpdatedAt,
+		ID:           r.ID,
+		MetricType:   string(r.MetricType),
+		Threshold:    pgutil.NumericToFloat64(r.Threshold),
+		Operator:     string(r.Operator),
+		Action:       string(r.Action),
+		Priority:     r.Priority,
+		Severity:     string(r.Severity),
+		IsActive:     r.IsActive,
+		DepartmentID: r.DepartmentID,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
 	}
 }
 
@@ -76,6 +80,7 @@ func ToFilteredResponse(r *db.ListRulesFilteredRow) RuleResponse {
 		Priority:     r.Priority,
 		Severity:     string(r.Severity),
 		IsActive:     r.IsActive,
+		DepartmentID: r.DepartmentID,
 		CreatedAt:    r.CreatedAt,
 		UpdatedAt:    r.UpdatedAt,
 		TriggerCount: r.TriggerCount,
@@ -100,6 +105,7 @@ type TopTriggeredRuleResponse struct {
 	Priority        int32      `json:"priority"`
 	Severity        string     `json:"severity"`
 	IsActive        bool       `json:"is_active"`
+	DepartmentID    *string    `json:"department_id,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 	TriggerCount    int32      `json:"trigger_count"`
@@ -116,6 +122,7 @@ func ToTopTriggeredResponse(r *db.GetTopTriggeredRulesRow) TopTriggeredRuleRespo
 		Priority:     r.Priority,
 		Severity:     string(r.Severity),
 		IsActive:     r.IsActive,
+		DepartmentID: r.DepartmentID,
 		CreatedAt:    r.CreatedAt,
 		UpdatedAt:    r.UpdatedAt,
 		TriggerCount: r.TriggerCount,

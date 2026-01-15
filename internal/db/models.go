@@ -321,6 +321,14 @@ func (ns NullRuleOperator) Value() (driver.Value, error) {
 	return string(ns.RuleOperator), nil
 }
 
+type Department struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Description *string   `json:"description"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 type Incident struct {
 	ID           string             `json:"id"`
 	ServiceID    string             `json:"service_id"`
@@ -366,14 +374,15 @@ type Metric struct {
 }
 
 type Notification struct {
-	ID         string    `json:"id"`
-	IncidentID string    `json:"incident_id"`
-	Target     string    `json:"target"`
-	Message    string    `json:"message"`
-	SentAt     time.Time `json:"sent_at"`
-	CreatedAt  time.Time `json:"created_at"`
-	IsRead     bool      `json:"is_read"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	IncidentID   string    `json:"incident_id"`
+	Target       string    `json:"target"`
+	Message      string    `json:"message"`
+	SentAt       time.Time `json:"sent_at"`
+	CreatedAt    time.Time `json:"created_at"`
+	IsRead       bool      `json:"is_read"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	DepartmentID *string   `json:"department_id"`
 }
 
 type Outbox struct {
@@ -392,16 +401,17 @@ type OutboxProcessing struct {
 }
 
 type QualityRule struct {
-	ID         string           `json:"id"`
-	MetricType MetricType       `json:"metric_type"`
-	Threshold  pgtype.Numeric   `json:"threshold"`
-	Operator   RuleOperator     `json:"operator"`
-	Action     RuleAction       `json:"action"`
-	Priority   int32            `json:"priority"`
-	Severity   IncidentSeverity `json:"severity"`
-	IsActive   bool             `json:"is_active"`
-	CreatedAt  time.Time        `json:"created_at"`
-	UpdatedAt  time.Time        `json:"updated_at"`
+	ID           string           `json:"id"`
+	MetricType   MetricType       `json:"metric_type"`
+	Threshold    pgtype.Numeric   `json:"threshold"`
+	Operator     RuleOperator     `json:"operator"`
+	Action       RuleAction       `json:"action"`
+	Priority     int32            `json:"priority"`
+	Severity     IncidentSeverity `json:"severity"`
+	IsActive     bool             `json:"is_active"`
+	CreatedAt    time.Time        `json:"created_at"`
+	UpdatedAt    time.Time        `json:"updated_at"`
+	DepartmentID *string          `json:"department_id"`
 }
 
 type Service struct {

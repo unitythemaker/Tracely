@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/unitythemaker/tracely/internal/config"
 	"github.com/unitythemaker/tracely/internal/db"
+	"github.com/unitythemaker/tracely/internal/department"
 	"github.com/unitythemaker/tracely/internal/elasticsearch"
 	"github.com/unitythemaker/tracely/internal/incident"
 	"github.com/unitythemaker/tracely/internal/metric"
@@ -81,6 +82,7 @@ func main() {
 
 	// Initialize repositories
 	serviceRepo := service.NewRepository(queries)
+	departmentRepo := department.NewRepository(queries)
 	metricRepo := metric.NewRepository(pool, queries)
 	ruleRepo := rule.NewRepository(queries)
 	incidentRepo := incident.NewRepository(pool, queries)
@@ -89,6 +91,7 @@ func main() {
 
 	// Initialize handlers
 	serviceHandler := service.NewHandler(serviceRepo)
+	departmentHandler := department.NewHandler(departmentRepo)
 	metricHandler := metric.NewHandler(metricRepo)
 	ruleHandler := rule.NewHandler(ruleRepo)
 	incidentHandler := incident.NewHandler(incidentRepo)
@@ -106,6 +109,7 @@ func main() {
 
 	// Register API routes
 	serviceHandler.RegisterRoutes(mux)
+	departmentHandler.RegisterRoutes(mux)
 	metricHandler.RegisterRoutes(mux)
 	ruleHandler.RegisterRoutes(mux)
 	incidentHandler.RegisterRoutes(mux)

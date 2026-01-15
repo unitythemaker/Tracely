@@ -69,7 +69,7 @@ func (r *Repository) ListFiltered(ctx context.Context, params ListFilteredParams
 	return notifications, int(total), nil
 }
 
-func (r *Repository) Create(ctx context.Context, incidentID, target, message string) (*db.Notification, error) {
+func (r *Repository) Create(ctx context.Context, incidentID, target, message string, departmentID *string) (*db.Notification, error) {
 	// Get next ID from sequence
 	id, err := r.q.NextNotificationID(ctx)
 	if err != nil {
@@ -77,10 +77,11 @@ func (r *Repository) Create(ctx context.Context, incidentID, target, message str
 	}
 
 	n, err := r.q.CreateNotification(ctx, db.CreateNotificationParams{
-		ID:         id,
-		IncidentID: incidentID,
-		Target:     target,
-		Message:    message,
+		ID:           id,
+		IncidentID:   incidentID,
+		Target:       target,
+		Message:      message,
+		DepartmentID: departmentID,
 	})
 	if err != nil {
 		return nil, err

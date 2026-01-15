@@ -12,8 +12,8 @@ WHERE incident_id = $1
 ORDER BY sent_at DESC;
 
 -- name: CreateNotification :one
-INSERT INTO notifications (id, incident_id, target, message)
-VALUES ($1, $2, $3, $4)
+INSERT INTO notifications (id, incident_id, target, message, department_id)
+VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
 -- name: NextNotificationID :one

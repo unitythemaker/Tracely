@@ -107,7 +107,7 @@ func (w *Worker) processEvent(ctx context.Context, event db.Outbox) error {
 		message := fmt.Sprintf("%s threshold exceeded: %.2f (threshold: %.2f, operator: %s)",
 			payload.MetricType, payload.Value, float64(rule.Threshold.Int.Int64())/100, rule.Operator)
 
-		_, err := w.incidentRepo.CreateWithOutbox(ctx, payload.ServiceID, rule.ID, metricID, rule.Severity, message)
+		_, err := w.incidentRepo.CreateWithOutbox(ctx, payload.ServiceID, rule.ID, metricID, rule.Severity, message, rule.DepartmentID)
 		if err != nil {
 			slog.Error("RuleWorker: failed to create incident", "rule_id", rule.ID, "error", err)
 			continue
@@ -118,6 +118,7 @@ func (w *Worker) processEvent(ctx context.Context, event db.Outbox) error {
 			"service_id", payload.ServiceID,
 			"metric_type", payload.MetricType,
 			"value", payload.Value,
+			"department_id", rule.DepartmentID,
 		)
 	}
 

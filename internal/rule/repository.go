@@ -94,14 +94,15 @@ func (r *Repository) ListFiltered(ctx context.Context, params RuleListFilteredPa
 
 func (r *Repository) Create(ctx context.Context, req CreateRuleRequest) (*db.QualityRule, error) {
 	rule, err := r.q.CreateRule(ctx, db.CreateRuleParams{
-		ID:         req.ID,
-		MetricType: db.MetricType(req.MetricType),
-		Threshold:  pgutil.Float64ToNumeric(req.Threshold),
-		Operator:   db.RuleOperator(req.Operator),
-		Action:     db.RuleAction(req.Action),
-		Priority:   req.Priority,
-		Severity:   db.IncidentSeverity(req.Severity),
-		IsActive:   req.IsActive,
+		ID:           req.ID,
+		MetricType:   db.MetricType(req.MetricType),
+		Threshold:    pgutil.Float64ToNumeric(req.Threshold),
+		Operator:     db.RuleOperator(req.Operator),
+		Action:       db.RuleAction(req.Action),
+		Priority:     req.Priority,
+		Severity:     db.IncidentSeverity(req.Severity),
+		IsActive:     req.IsActive,
+		DepartmentID: req.DepartmentID,
 	})
 	if err != nil {
 		return nil, err
@@ -111,14 +112,15 @@ func (r *Repository) Create(ctx context.Context, req CreateRuleRequest) (*db.Qua
 
 func (r *Repository) Update(ctx context.Context, id string, req UpdateRuleRequest) (*db.QualityRule, error) {
 	rule, err := r.q.UpdateRule(ctx, db.UpdateRuleParams{
-		ID:         id,
-		MetricType: db.MetricType(req.MetricType),
-		Threshold:  pgutil.Float64ToNumeric(req.Threshold),
-		Operator:   db.RuleOperator(req.Operator),
-		Action:     db.RuleAction(req.Action),
-		Priority:   req.Priority,
-		Severity:   db.IncidentSeverity(req.Severity),
-		IsActive:   req.IsActive,
+		ID:           id,
+		MetricType:   db.MetricType(req.MetricType),
+		Threshold:    pgutil.Float64ToNumeric(req.Threshold),
+		Operator:     db.RuleOperator(req.Operator),
+		Action:       db.RuleAction(req.Action),
+		Priority:     req.Priority,
+		Severity:     db.IncidentSeverity(req.Severity),
+		IsActive:     req.IsActive,
+		DepartmentID: req.DepartmentID,
 	})
 	if err != nil {
 		return nil, err

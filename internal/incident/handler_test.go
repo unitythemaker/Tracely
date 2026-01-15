@@ -373,7 +373,7 @@ func TestIncidentRepository_CreateWithOutbox(t *testing.T) {
 	repo := NewRepository(pool, q)
 	ctx := context.Background()
 
-	inc, err := repo.CreateWithOutbox(ctx, "repo-service", "repo-rule", metric.ID, db.IncidentSeverityCRITICAL, "Test message")
+	inc, err := repo.CreateWithOutbox(ctx, "repo-service", "repo-rule", metric.ID, db.IncidentSeverityCRITICAL, "Test message", nil)
 	if err != nil {
 		t.Fatalf("Failed to create incident with outbox: %v", err)
 	}

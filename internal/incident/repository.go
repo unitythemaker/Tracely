@@ -200,7 +200,7 @@ func (r *Repository) CreateEvent(ctx context.Context, incidentID string, eventTy
 }
 
 // CreateWithOutbox creates an incident and an outbox event in a single transaction
-func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID string, metricID uuid.UUID, severity db.IncidentSeverity, message string) (*db.Incident, error) {
+func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID string, metricID uuid.UUID, severity db.IncidentSeverity, message string, departmentID *string) (*db.Incident, error) {
 	var incident db.Incident
 
 	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
@@ -229,7 +229,7 @@ func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID str
 		incident = inc
 
 		// Create outbox event
-		payload, err := json.Marshal(map[string]any{
+		payloadMap := map[string]any{
 			"id":         inc.ID,
 			"service_id": inc.ServiceID,
 			"rule_id":    inc.RuleID,
@@ -237,7 +237,12 @@ func (r *Repository) CreateWithOutbox(ctx context.Context, serviceID, ruleID str
 			"severity":   string(inc.Severity),
 			"status":     string(inc.Status),
 			"message":    message,
-		})
+		}
+		if departmentID != nil {
+			payloadMap["department_id"] = *departmentID
+		}
+
+		payload, err := json.Marshal(payloadMap)
 		if err != nil {
 			return err
 		}

@@ -62,13 +62,13 @@ WHERE
   ));
 
 -- name: CreateRule :one
-INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active, department_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 RETURNING *;
 
 -- name: UpdateRule :one
 UPDATE quality_rules
-SET metric_type = $2, threshold = $3, operator = $4, action = $5, priority = $6, severity = $7, is_active = $8
+SET metric_type = $2, threshold = $3, operator = $4, action = $5, priority = $6, severity = $7, is_active = $8, department_id = $9
 WHERE id = $1
 RETURNING *;
 
@@ -91,6 +91,7 @@ SELECT
   r.priority,
   r.severity,
   r.is_active,
+  r.department_id,
   r.created_at,
   r.updated_at,
   COUNT(i.id)::int AS trigger_count,
