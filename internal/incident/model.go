@@ -12,17 +12,18 @@ type UpdateIncidentRequest struct {
 }
 
 type IncidentResponse struct {
-	ID        string     `json:"id"`
-	ServiceID string     `json:"service_id"`
-	RuleID    string     `json:"rule_id"`
-	MetricID  uuid.UUID  `json:"metric_id"`
-	Severity  string     `json:"severity"`
-	Status    string     `json:"status"`
-	Message   *string    `json:"message"`
-	OpenedAt  time.Time  `json:"opened_at"`
-	ClosedAt  *time.Time `json:"closed_at"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
+	ID           string     `json:"id"`
+	ServiceID    string     `json:"service_id"`
+	RuleID       string     `json:"rule_id"`
+	MetricID     uuid.UUID  `json:"metric_id"`
+	Severity     string     `json:"severity"`
+	Status       string     `json:"status"`
+	Message      *string    `json:"message"`
+	OpenedAt     time.Time  `json:"opened_at"`
+	InProgressAt *time.Time `json:"in_progress_at"`
+	ClosedAt     *time.Time `json:"closed_at"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 func ToResponse(i *db.Incident) IncidentResponse {
@@ -31,18 +32,24 @@ func ToResponse(i *db.Incident) IncidentResponse {
 		closedAt = &i.ClosedAt.Time
 	}
 
+	var inProgressAt *time.Time
+	if i.InProgressAt.Valid {
+		inProgressAt = &i.InProgressAt.Time
+	}
+
 	return IncidentResponse{
-		ID:        i.ID,
-		ServiceID: i.ServiceID,
-		RuleID:    i.RuleID,
-		MetricID:  i.MetricID,
-		Severity:  string(i.Severity),
-		Status:    string(i.Status),
-		Message:   i.Message,
-		OpenedAt:  i.OpenedAt,
-		ClosedAt:  closedAt,
-		CreatedAt: i.CreatedAt,
-		UpdatedAt: i.UpdatedAt,
+		ID:           i.ID,
+		ServiceID:    i.ServiceID,
+		RuleID:       i.RuleID,
+		MetricID:     i.MetricID,
+		Severity:     string(i.Severity),
+		Status:       string(i.Status),
+		Message:      i.Message,
+		OpenedAt:     i.OpenedAt,
+		InProgressAt: inProgressAt,
+		ClosedAt:     closedAt,
+		CreatedAt:    i.CreatedAt,
+		UpdatedAt:    i.UpdatedAt,
 	}
 }
 

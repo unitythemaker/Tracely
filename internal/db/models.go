@@ -56,6 +56,51 @@ func (ns NullEventType) Value() (driver.Value, error) {
 	return string(ns.EventType), nil
 }
 
+type IncidentEventType string
+
+const (
+	IncidentEventTypeCREATED         IncidentEventType = "CREATED"
+	IncidentEventTypeSTATUSCHANGED   IncidentEventType = "STATUS_CHANGED"
+	IncidentEventTypeCOMMENTADDED    IncidentEventType = "COMMENT_ADDED"
+	IncidentEventTypeASSIGNED        IncidentEventType = "ASSIGNED"
+	IncidentEventTypeSEVERITYCHANGED IncidentEventType = "SEVERITY_CHANGED"
+)
+
+func (e *IncidentEventType) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = IncidentEventType(s)
+	case string:
+		*e = IncidentEventType(s)
+	default:
+		return fmt.Errorf("unsupported scan type for IncidentEventType: %T", src)
+	}
+	return nil
+}
+
+type NullIncidentEventType struct {
+	IncidentEventType IncidentEventType `json:"incident_event_type"`
+	Valid             bool              `json:"valid"` // Valid is true if IncidentEventType is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullIncidentEventType) Scan(value interface{}) error {
+	if value == nil {
+		ns.IncidentEventType, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.IncidentEventType.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullIncidentEventType) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.IncidentEventType), nil
+}
+
 type IncidentSeverity string
 
 const (
@@ -277,17 +322,38 @@ func (ns NullRuleOperator) Value() (driver.Value, error) {
 }
 
 type Incident struct {
-	ID        string             `json:"id"`
-	ServiceID string             `json:"service_id"`
-	RuleID    string             `json:"rule_id"`
-	MetricID  uuid.UUID          `json:"metric_id"`
-	Severity  IncidentSeverity   `json:"severity"`
-	Status    IncidentStatus     `json:"status"`
-	Message   *string            `json:"message"`
-	OpenedAt  time.Time          `json:"opened_at"`
-	ClosedAt  pgtype.Timestamptz `json:"closed_at"`
-	CreatedAt time.Time          `json:"created_at"`
-	UpdatedAt time.Time          `json:"updated_at"`
+	ID           string             `json:"id"`
+	ServiceID    string             `json:"service_id"`
+	RuleID       string             `json:"rule_id"`
+	MetricID     uuid.UUID          `json:"metric_id"`
+	Severity     IncidentSeverity   `json:"severity"`
+	Status       IncidentStatus     `json:"status"`
+	Message      *string            `json:"message"`
+	OpenedAt     time.Time          `json:"opened_at"`
+	ClosedAt     pgtype.Timestamptz `json:"closed_at"`
+	CreatedAt    time.Time          `json:"created_at"`
+	UpdatedAt    time.Time          `json:"updated_at"`
+	InProgressAt pgtype.Timestamptz `json:"in_progress_at"`
+}
+
+type IncidentComment struct {
+	ID         uuid.UUID `json:"id"`
+	IncidentID string    `json:"incident_id"`
+	Author     string    `json:"author"`
+	Content    string    `json:"content"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
+type IncidentEvent struct {
+	ID         uuid.UUID         `json:"id"`
+	IncidentID string            `json:"incident_id"`
+	EventType  IncidentEventType `json:"event_type"`
+	Actor      *string           `json:"actor"`
+	OldValue   *string           `json:"old_value"`
+	NewValue   *string           `json:"new_value"`
+	Metadata   []byte            `json:"metadata"`
+	CreatedAt  time.Time         `json:"created_at"`
 }
 
 type Metric struct {

@@ -13,6 +13,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countMetricsFiltered = `-- name: CountMetricsFiltered :one
+SELECT COUNT(*)::int FROM metrics
+WHERE
+  ($1::text IS NULL OR service_id = ANY(string_to_array($1, ',')))
+  AND ($2::metric_type IS NULL OR metric_type = $2)
+  AND ($3::text IS NULL OR (
+    service_id ILIKE '%' || $3 || '%'
+    OR CAST(value AS TEXT) ILIKE '%' || $3 || '%'
+  ))
+`
+
+type CountMetricsFilteredParams struct {
+	FilterServiceID  *string        `json:"filter_service_id"`
+	FilterMetricType NullMetricType `json:"filter_metric_type"`
+	FilterSearch     *string        `json:"filter_search"`
+}
+
+func (q *Queries) CountMetricsFiltered(ctx context.Context, arg CountMetricsFilteredParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countMetricsFiltered, arg.FilterServiceID, arg.FilterMetricType, arg.FilterSearch)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createMetric = `-- name: CreateMetric :one
 INSERT INTO metrics (service_id, metric_type, value, recorded_at)
 VALUES ($1, $2, $3, $4)
@@ -87,6 +111,93 @@ func (q *Queries) GetMetric(ctx context.Context, id uuid.UUID) (Metric, error) {
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const getMetricsAggregated = `-- name: GetMetricsAggregated :many
+WITH time_buckets AS (
+  SELECT
+    date_trunc($1::text, recorded_at)::timestamptz AS bucket_time,
+    metric_type,
+    service_id,
+    value::numeric AS value
+  FROM metrics
+  WHERE
+    ($2::text IS NULL OR service_id = ANY(string_to_array($2, ',')))
+    AND ($3::metric_type IS NULL OR metric_type = $3)
+    AND recorded_at >= $4
+    AND recorded_at <= $5
+)
+SELECT
+  bucket_time::timestamptz AS bucket_time,
+  metric_type::metric_type AS metric_type,
+  COUNT(*)::int AS count,
+  MIN(value)::numeric AS min_value,
+  MAX(value)::numeric AS max_value,
+  AVG(value)::float8 AS avg_value,
+  PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY value)::float8 AS p50_value,
+  PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY value)::float8 AS p95_value,
+  PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY value)::float8 AS p99_value
+FROM time_buckets
+GROUP BY bucket_time, metric_type
+ORDER BY bucket_time ASC, metric_type ASC
+`
+
+type GetMetricsAggregatedParams struct {
+	BucketSize       string         `json:"bucket_size"`
+	FilterServiceID  *string        `json:"filter_service_id"`
+	FilterMetricType NullMetricType `json:"filter_metric_type"`
+	FromTime         time.Time      `json:"from_time"`
+	ToTime           time.Time      `json:"to_time"`
+}
+
+type GetMetricsAggregatedRow struct {
+	BucketTime time.Time      `json:"bucket_time"`
+	MetricType MetricType     `json:"metric_type"`
+	Count      int32          `json:"count"`
+	MinValue   pgtype.Numeric `json:"min_value"`
+	MaxValue   pgtype.Numeric `json:"max_value"`
+	AvgValue   float64        `json:"avg_value"`
+	P50Value   float64        `json:"p50_value"`
+	P95Value   float64        `json:"p95_value"`
+	P99Value   float64        `json:"p99_value"`
+}
+
+// Aggregates metrics into time buckets for chart display
+// Returns min, max, avg, p50, p95, p99 for each bucket
+func (q *Queries) GetMetricsAggregated(ctx context.Context, arg GetMetricsAggregatedParams) ([]GetMetricsAggregatedRow, error) {
+	rows, err := q.db.Query(ctx, getMetricsAggregated,
+		arg.BucketSize,
+		arg.FilterServiceID,
+		arg.FilterMetricType,
+		arg.FromTime,
+		arg.ToTime,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GetMetricsAggregatedRow{}
+	for rows.Next() {
+		var i GetMetricsAggregatedRow
+		if err := rows.Scan(
+			&i.BucketTime,
+			&i.MetricType,
+			&i.Count,
+			&i.MinValue,
+			&i.MaxValue,
+			&i.AvgValue,
+			&i.P50Value,
+			&i.P95Value,
+			&i.P99Value,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listMetrics = `-- name: ListMetrics :many
@@ -187,6 +298,122 @@ func (q *Queries) ListMetricsByServiceAndType(ctx context.Context, arg ListMetri
 		arg.MetricType,
 		arg.Limit,
 		arg.Offset,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Metric{}
+	for rows.Next() {
+		var i Metric
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceID,
+			&i.MetricType,
+			&i.Value,
+			&i.RecordedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMetricsFiltered = `-- name: ListMetricsFiltered :many
+SELECT id, service_id, metric_type, value, recorded_at, created_at FROM metrics
+WHERE
+  ($1::text IS NULL OR service_id = ANY(string_to_array($1, ',')))
+  AND ($2::metric_type IS NULL OR metric_type = $2)
+  AND ($3::text IS NULL OR (
+    service_id ILIKE '%' || $3 || '%'
+    OR CAST(value AS TEXT) ILIKE '%' || $3 || '%'
+  ))
+ORDER BY
+  CASE WHEN $4::text = 'service_id' AND $5::text = 'asc' THEN service_id END ASC,
+  CASE WHEN $4::text = 'service_id' AND $5::text = 'desc' THEN service_id END DESC,
+  CASE WHEN $4::text = 'metric_type' AND $5::text = 'asc' THEN metric_type END ASC,
+  CASE WHEN $4::text = 'metric_type' AND $5::text = 'desc' THEN metric_type END DESC,
+  CASE WHEN $4::text = 'value' AND $5::text = 'asc' THEN value END ASC,
+  CASE WHEN $4::text = 'value' AND $5::text = 'desc' THEN value END DESC,
+  CASE WHEN $4::text = 'recorded_at' AND $5::text = 'asc' THEN recorded_at END ASC,
+  CASE WHEN $4::text = 'recorded_at' AND $5::text = 'desc' THEN recorded_at END DESC,
+  recorded_at DESC
+LIMIT $7 OFFSET $6
+`
+
+type ListMetricsFilteredParams struct {
+	FilterServiceID  *string        `json:"filter_service_id"`
+	FilterMetricType NullMetricType `json:"filter_metric_type"`
+	FilterSearch     *string        `json:"filter_search"`
+	SortBy           string         `json:"sort_by"`
+	SortDir          string         `json:"sort_dir"`
+	OffsetVal        int32          `json:"offset_val"`
+	LimitVal         int32          `json:"limit_val"`
+}
+
+func (q *Queries) ListMetricsFiltered(ctx context.Context, arg ListMetricsFilteredParams) ([]Metric, error) {
+	rows, err := q.db.Query(ctx, listMetricsFiltered,
+		arg.FilterServiceID,
+		arg.FilterMetricType,
+		arg.FilterSearch,
+		arg.SortBy,
+		arg.SortDir,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Metric{}
+	for rows.Next() {
+		var i Metric
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceID,
+			&i.MetricType,
+			&i.Value,
+			&i.RecordedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listMetricsInRange = `-- name: ListMetricsInRange :many
+SELECT id, service_id, metric_type, value, recorded_at, created_at FROM metrics
+WHERE
+  ($1::text IS NULL OR service_id = ANY(string_to_array($1, ',')))
+  AND ($2::metric_type IS NULL OR metric_type = $2)
+  AND recorded_at >= $3
+  AND recorded_at <= $4
+ORDER BY recorded_at ASC
+`
+
+type ListMetricsInRangeParams struct {
+	FilterServiceID  *string        `json:"filter_service_id"`
+	FilterMetricType NullMetricType `json:"filter_metric_type"`
+	FromTime         time.Time      `json:"from_time"`
+	ToTime           time.Time      `json:"to_time"`
+}
+
+func (q *Queries) ListMetricsInRange(ctx context.Context, arg ListMetricsInRangeParams) ([]Metric, error) {
+	rows, err := q.db.Query(ctx, listMetricsInRange,
+		arg.FilterServiceID,
+		arg.FilterMetricType,
+		arg.FromTime,
+		arg.ToTime,
 	)
 	if err != nil {
 		return nil, err

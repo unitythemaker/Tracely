@@ -35,6 +35,63 @@ func (r *Repository) ListActiveByMetricType(ctx context.Context, metricType db.M
 	return r.q.ListActiveRulesByMetricType(ctx, metricType)
 }
 
+type RuleListFilteredParams struct {
+	MetricType *db.MetricType
+	Severity   *db.IncidentSeverity
+	IsActive   *bool
+	Search     *string
+	SortBy     string
+	SortDir    string
+	Limit      int32
+	Offset     int32
+}
+
+func (r *Repository) ListFiltered(ctx context.Context, params RuleListFilteredParams) ([]db.QualityRule, int, error) {
+	filterParams := db.ListRulesFilteredParams{
+		LimitVal:  params.Limit,
+		OffsetVal: params.Offset,
+		SortBy:    params.SortBy,
+		SortDir:   params.SortDir,
+	}
+
+	if params.MetricType != nil {
+		filterParams.FilterMetricType = db.NullMetricType{
+			MetricType: *params.MetricType,
+			Valid:      true,
+		}
+	}
+	if params.Severity != nil {
+		filterParams.FilterSeverity = db.NullIncidentSeverity{
+			IncidentSeverity: *params.Severity,
+			Valid:            true,
+		}
+	}
+	if params.IsActive != nil {
+		filterParams.FilterIsActive = params.IsActive
+	}
+	if params.Search != nil {
+		filterParams.FilterSearch = params.Search
+	}
+
+	rules, err := r.q.ListRulesFiltered(ctx, filterParams)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	countParams := db.CountRulesFilteredParams{
+		FilterMetricType: filterParams.FilterMetricType,
+		FilterSeverity:   filterParams.FilterSeverity,
+		FilterIsActive:   filterParams.FilterIsActive,
+		FilterSearch:     filterParams.FilterSearch,
+	}
+	total, err := r.q.CountRulesFiltered(ctx, countParams)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return rules, int(total), nil
+}
+
 func (r *Repository) Create(ctx context.Context, req CreateRuleRequest) (*db.QualityRule, error) {
 	rule, err := r.q.CreateRule(ctx, db.CreateRuleParams{
 		ID:         req.ID,

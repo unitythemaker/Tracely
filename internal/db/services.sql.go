@@ -9,6 +9,22 @@ import (
 	"context"
 )
 
+const countServicesFiltered = `-- name: CountServicesFiltered :one
+SELECT COUNT(*)::int FROM services
+WHERE
+  ($1::text IS NULL OR (
+    id ILIKE '%' || $1 || '%'
+    OR name ILIKE '%' || $1 || '%'
+  ))
+`
+
+func (q *Queries) CountServicesFiltered(ctx context.Context, dollar_1 string) (int32, error) {
+	row := q.db.QueryRow(ctx, countServicesFiltered, dollar_1)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createService = `-- name: CreateService :one
 INSERT INTO services (id, name)
 VALUES ($1, $2)
@@ -53,6 +69,58 @@ SELECT id, name, created_at FROM services ORDER BY name
 
 func (q *Queries) ListServices(ctx context.Context) ([]Service, error) {
 	rows, err := q.db.Query(ctx, listServices)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Service{}
+	for rows.Next() {
+		var i Service
+		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServicesFiltered = `-- name: ListServicesFiltered :many
+SELECT id, name, created_at FROM services
+WHERE
+  ($1::text IS NULL OR (
+    id ILIKE '%' || $1 || '%'
+    OR name ILIKE '%' || $1 || '%'
+  ))
+ORDER BY
+  CASE WHEN $2 = 'id' AND $3 = 'asc' THEN id END ASC,
+  CASE WHEN $2 = 'id' AND $3 = 'desc' THEN id END DESC,
+  CASE WHEN $2 = 'name' AND $3 = 'asc' THEN name END ASC,
+  CASE WHEN $2 = 'name' AND $3 = 'desc' THEN name END DESC,
+  CASE WHEN $2 = 'created_at' AND $3 = 'asc' THEN created_at END ASC,
+  CASE WHEN $2 = 'created_at' AND $3 = 'desc' THEN created_at END DESC,
+  name ASC
+LIMIT $4 OFFSET $5
+`
+
+type ListServicesFilteredParams struct {
+	Column1 string      `json:"column_1"`
+	Column2 interface{} `json:"column_2"`
+	Column3 interface{} `json:"column_3"`
+	Limit   int32       `json:"limit"`
+	Offset  int32       `json:"offset"`
+}
+
+func (q *Queries) ListServicesFiltered(ctx context.Context, arg ListServicesFilteredParams) ([]Service, error) {
+	rows, err := q.db.Query(ctx, listServicesFiltered,
+		arg.Column1,
+		arg.Column2,
+		arg.Column3,
+		arg.Limit,
+		arg.Offset,
+	)
 	if err != nil {
 		return nil, err
 	}

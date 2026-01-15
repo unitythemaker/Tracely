@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,8 +13,18 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { api, Metric, Service, METRIC_TYPE_LABELS, formatLabel } from '@/lib/api';
-import { format } from 'date-fns';
+import {
+  api,
+  Metric,
+  Service,
+  AggregatedMetric,
+  ChartParams,
+  METRIC_TYPE_LABELS,
+  formatLabel,
+  ListParams,
+  PaginationMeta,
+} from '@/lib/api';
+import { format, subHours, subDays } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
   Activity,
@@ -26,6 +36,8 @@ import {
   ArrowUp,
   ArrowDown,
   X,
+  Clock,
+  Calendar,
 } from 'lucide-react';
 import {
   XAxis,
@@ -35,7 +47,14 @@ import {
   ResponsiveContainer,
   Area,
   AreaChart,
+  Legend,
+  Line,
+  LineChart,
+  ReferenceLine,
 } from 'recharts';
+import { Pagination } from '@/components/ui/pagination';
+import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
+import { MultiSelect } from '@/components/ui/multi-select';
 
 const metricTypeConfig: Record<string, { color: string; unit: string }> = {
   LATENCY_MS: { color: '#00d9ff', unit: 'ms' },
@@ -47,83 +66,248 @@ const metricTypeConfig: Record<string, { color: string; unit: string }> = {
 type SortField = 'service_id' | 'metric_type' | 'value' | 'recorded_at';
 type SortDirection = 'asc' | 'desc';
 
+// Time range presets
+const TIME_RANGES = [
+  { id: '1h', label: '1 Saat', hours: 1 },
+  { id: '6h', label: '6 Saat', hours: 6 },
+  { id: '12h', label: '12 Saat', hours: 12 },
+  { id: '24h', label: '24 Saat', hours: 24 },
+  { id: '7d', label: '7 Gün', hours: 24 * 7 },
+] as const;
+
+const COLUMNS: ColumnDefinition[] = [
+  { id: 'service_id', label: 'Servis', defaultVisible: true },
+  { id: 'metric_type', label: 'Tip', defaultVisible: true },
+  { id: 'value', label: 'Değer', defaultVisible: true },
+  { id: 'recorded_at', label: 'Tarih', defaultVisible: true },
+  { id: 'id', label: 'ID', defaultVisible: false },
+  { id: 'created_at', label: 'Oluşturulma', defaultVisible: false },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = COLUMNS.filter((c) => c.defaultVisible !== false).map((c) => c.id);
+
+// Custom tooltip for aggregated chart data
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+
+  const data = payload[0]?.payload;
+  if (!data) return null;
+
+  const metricType = data.metric_type || 'LATENCY_MS';
+  const config = metricTypeConfig[metricType] || { color: '#00d9ff', unit: '' };
+
+  return (
+    <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3 shadow-xl">
+      <p className="text-sm font-medium text-white mb-2">{label}</p>
+      <div className="space-y-1.5 text-xs">
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Ortalama:</span>
+          <span className="font-mono text-white">{data.avg?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Min:</span>
+          <span className="font-mono text-[#10b981]">{data.min?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Max:</span>
+          <span className="font-mono text-[#ff4d6a]">{data.max?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="border-t border-[#30363d] my-1.5" />
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">P50:</span>
+          <span className="font-mono text-[#a855f7]">{data.p50?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">P95:</span>
+          <span className="font-mono text-[#ffb800]">{data.p95?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">P99:</span>
+          <span className="font-mono text-[#ff4d6a]">{data.p99?.toFixed(2)} {config.unit}</span>
+        </div>
+        <div className="border-t border-[#30363d] my-1.5" />
+        <div className="flex justify-between gap-4">
+          <span className="text-muted-foreground">Veri sayısı:</span>
+          <span className="font-mono text-white">{data.count}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Multi-metric tooltip
+function MultiMetricTooltip({ active, payload, label }: any) {
+  if (!active || !payload || !payload.length) return null;
+
+  return (
+    <div className="bg-[#0d1117] border border-[#30363d] rounded-lg p-3 shadow-xl">
+      <p className="text-sm font-medium text-white mb-2">{label}</p>
+      <div className="space-y-2 text-xs">
+        {payload.map((entry: any, index: number) => {
+          const metricType = entry.dataKey;
+          const config = metricTypeConfig[metricType] || { color: entry.color, unit: '' };
+          const data = entry.payload[`${metricType}_data`];
+
+          return (
+            <div key={index} className="space-y-1">
+              <div className="flex items-center gap-2">
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={{ backgroundColor: config.color }}
+                />
+                <span className="font-medium" style={{ color: config.color }}>
+                  {METRIC_TYPE_LABELS[metricType] || metricType}
+                </span>
+              </div>
+              {data && (
+                <div className="pl-4 space-y-0.5 text-muted-foreground">
+                  <div className="flex justify-between gap-3">
+                    <span>Avg:</span>
+                    <span className="font-mono text-white">{data.avg?.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span>Min-Max:</span>
+                    <span className="font-mono text-white">
+                      {data.min?.toFixed(1)} - {data.max?.toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function MetricsPage() {
   const [metrics, setMetrics] = useState<Metric[]>([]);
+  const [chartData, setChartData] = useState<AggregatedMetric[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [loading, setLoading] = useState(true);
+  const [chartLoading, setChartLoading] = useState(true);
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, limit: 20, offset: 0 });
 
   // Filters
-  const [selectedService, setSelectedService] = useState<string>('all');
+  const [selectedService, setSelectedService] = useState<string[]>([]);
   const [selectedType, setSelectedType] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  // Time range for chart
+  const [timeRange, setTimeRange] = useState<string>('24h');
 
   // Sorting
   const [sortField, setSortField] = useState<SortField>('recorded_at');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
+  // Pagination
+  const [limit, setLimit] = useState(20);
+  const [offset, setOffset] = useState(0);
+
+  // Column visibility
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
+
+  // Debounce search
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    async function fetchData() {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setOffset(0);
+    }, 300);
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Fetch services once
+  useEffect(() => {
+    async function fetchServices() {
       try {
-        const [metricsData, servicesData] = await Promise.all([
-          api.getMetrics(200),
-          api.getServices(),
-        ]);
-        setMetrics(metricsData || []);
-        setServices(servicesData || []);
+        const servicesRes = await api.getServices({ limit: 100 });
+        setServices(servicesRes.data || []);
       } catch (error) {
-        console.error('Failed to fetch data:', error);
-      } finally {
-        setLoading(false);
+        console.error('Failed to fetch services:', error);
       }
     }
-    fetchData();
+    fetchServices();
   }, []);
 
-  // Filtering and sorting
-  const filteredAndSortedMetrics = useMemo(() => {
-    let result = [...metrics];
+  // Fetch metrics for table (with pagination)
+  const fetchMetrics = useCallback(async () => {
+    setLoading(true);
+    try {
+      const params: ListParams = {
+        limit,
+        offset,
+        sort_by: sortField,
+        sort_dir: sortDirection,
+      };
 
-    // Apply filters
-    if (selectedService !== 'all') {
-      result = result.filter((m) => m.service_id === selectedService);
-    }
-    if (selectedType !== 'all') {
-      result = result.filter((m) => m.metric_type === selectedType);
-    }
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(
-        (m) =>
-          m.service_id.toLowerCase().includes(query) ||
-          m.metric_type.toLowerCase().includes(query) ||
-          m.value.toString().includes(query)
-      );
-    }
-
-    // Apply sorting
-    result.sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortField) {
-        case 'service_id':
-          comparison = a.service_id.localeCompare(b.service_id);
-          break;
-        case 'metric_type':
-          comparison = a.metric_type.localeCompare(b.metric_type);
-          break;
-        case 'value':
-          comparison = a.value - b.value;
-          break;
-        case 'recorded_at':
-          comparison = new Date(a.recorded_at).getTime() - new Date(b.recorded_at).getTime();
-          break;
+      if (selectedService.length > 0) {
+        params.service_id = selectedService.join(',');
+      }
+      if (selectedType !== 'all') {
+        params.metric_type = selectedType;
+      }
+      if (debouncedSearch) {
+        params.search = debouncedSearch;
       }
 
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
+      const response = await api.getMetrics(params);
+      setMetrics(response.data || []);
+      setMeta(response.meta);
+    } catch (error) {
+      console.error('Failed to fetch metrics:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch]);
 
-    return result;
-  }, [metrics, selectedService, selectedType, searchQuery, sortField, sortDirection]);
+  // Fetch aggregated chart data
+  const fetchChartData = useCallback(async () => {
+    setChartLoading(true);
+    try {
+      const range = TIME_RANGES.find((r) => r.id === timeRange) || TIME_RANGES[3];
+      const now = new Date();
+      const from = range.hours >= 24 * 7
+        ? subDays(now, Math.floor(range.hours / 24))
+        : subHours(now, range.hours);
+
+      const params: ChartParams = {
+        from: from.toISOString(),
+        to: now.toISOString(),
+      };
+
+      if (selectedService.length > 0) {
+        params.service_id = selectedService.join(',');
+      }
+      if (selectedType !== 'all') {
+        params.metric_type = selectedType;
+      }
+
+      const data = await api.getMetricsChart(params);
+      setChartData(data || []);
+    } catch (error) {
+      console.error('Failed to fetch chart data:', error);
+    } finally {
+      setChartLoading(false);
+    }
+  }, [selectedService, selectedType, timeRange]);
+
+  useEffect(() => {
+    fetchMetrics();
+  }, [fetchMetrics]);
+
+  useEffect(() => {
+    fetchChartData();
+  }, [fetchChartData]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -132,6 +316,7 @@ export default function MetricsPage() {
       setSortField(field);
       setSortDirection('desc');
     }
+    setOffset(0);
   }
 
   function SortIcon({ field }: { field: SortField }) {
@@ -144,42 +329,80 @@ export default function MetricsPage() {
   }
 
   function clearFilters() {
-    setSelectedService('all');
+    setSelectedService([]);
     setSelectedType('all');
     setSearchQuery('');
+    setDebouncedSearch('');
+    setOffset(0);
   }
 
-  const hasActiveFilters = selectedService !== 'all' || selectedType !== 'all' || searchQuery;
+  const hasActiveFilters = selectedService.length > 0 || selectedType !== 'all' || searchQuery;
 
-  const chartData = filteredAndSortedMetrics
-    .slice(0, 30)
-    .reverse()
-    .map((m) => ({
-      time: format(new Date(m.recorded_at), 'HH:mm', { locale: tr }),
-      value: m.value,
-      type: m.metric_type,
-    }));
+  // Prepare chart data for display
+  const prepareChartData = () => {
+    if (chartData.length === 0) return [];
 
-  // Calculate trend
-  const latestValue = chartData[chartData.length - 1]?.value || 0;
-  const previousValue = chartData[chartData.length - 2]?.value || latestValue;
-  const trend = latestValue - previousValue;
-  const trendPercent = previousValue > 0 ? ((trend / previousValue) * 100).toFixed(1) : '0';
+    const range = TIME_RANGES.find((r) => r.id === timeRange) || TIME_RANGES[3];
+    const timeFormat = range.hours > 24 ? 'dd/MM HH:mm' : 'HH:mm';
 
-  // Get chart color based on selected type or default
+    if (selectedType !== 'all') {
+      // Single metric type - show with min/max area
+      return chartData.map((d) => ({
+        time: format(new Date(d.time), timeFormat, { locale: tr }),
+        avg: d.avg,
+        min: d.min,
+        max: d.max,
+        p50: d.p50,
+        p95: d.p95,
+        p99: d.p99,
+        count: d.count,
+        metric_type: d.metric_type,
+      }));
+    }
+
+    // Multiple metric types - group by time
+    const timeGroups = new Map<string, Record<string, any>>();
+
+    chartData.forEach((d) => {
+      const timeLabel = format(new Date(d.time), timeFormat, { locale: tr });
+      if (!timeGroups.has(timeLabel)) {
+        timeGroups.set(timeLabel, { time: timeLabel });
+      }
+      const group = timeGroups.get(timeLabel)!;
+      group[d.metric_type] = d.avg;
+      group[`${d.metric_type}_data`] = d; // Store full data for tooltip
+    });
+
+    return Array.from(timeGroups.values());
+  };
+
+  const processedChartData = prepareChartData();
+
+  // Get unique metric types in chart data
+  const activeMetricTypes =
+    selectedType !== 'all'
+      ? [selectedType]
+      : [...new Set(chartData.map((d) => d.metric_type))];
+
+  // Calculate stats from chart data
+  const chartStats = {
+    latest: chartData[chartData.length - 1]?.avg || 0,
+    previous: chartData[chartData.length - 2]?.avg || chartData[chartData.length - 1]?.avg || 0,
+    min: Math.min(...chartData.map((d) => d.min)),
+    max: Math.max(...chartData.map((d) => d.max)),
+    avgP95: chartData.length > 0
+      ? chartData.reduce((sum, d) => sum + d.p95, 0) / chartData.length
+      : 0,
+  };
+
+  const trend = chartStats.latest - chartStats.previous;
+  const trendPercent = chartStats.previous > 0 ? ((trend / chartStats.previous) * 100).toFixed(1) : '0';
+
   const chartColor =
     selectedType !== 'all' ? metricTypeConfig[selectedType]?.color || '#00d9ff' : '#00d9ff';
 
-  // Get unique services from metrics
-  const uniqueServices = [...new Set(metrics.map((m) => m.service_id))];
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00d9ff]" />
-      </div>
-    );
-  }
+  const uniqueServices = services.map((s) => ({ label: s.name, value: s.id }));
+  const isColumnVisible = (columnId: string) => visibleColumns.includes(columnId);
 
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
@@ -199,7 +422,7 @@ export default function MetricsPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Son Değer</p>
                 <p className="text-3xl font-bold text-foreground font-data">
-                  {latestValue.toFixed(1)}
+                  {chartStats.latest.toFixed(1)}
                 </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-[#00d9ff]/10 flex items-center justify-center">
@@ -239,9 +462,11 @@ export default function MetricsPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Toplam Metrik</p>
-                <p className="text-3xl font-bold text-foreground font-data">
-                  {filteredAndSortedMetrics.length}
+                <p className="text-sm text-muted-foreground">Min / Max</p>
+                <p className="text-2xl font-bold text-foreground font-data">
+                  <span className="text-[#10b981]">{isFinite(chartStats.min) ? chartStats.min.toFixed(1) : '-'}</span>
+                  <span className="text-muted-foreground mx-1">/</span>
+                  <span className="text-[#ff4d6a]">{isFinite(chartStats.max) ? chartStats.max.toFixed(1) : '-'}</span>
                 </p>
               </div>
             </div>
@@ -251,18 +476,164 @@ export default function MetricsPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Ortalama</p>
-                <p className="text-3xl font-bold text-foreground font-data">
-                  {(
-                    filteredAndSortedMetrics.reduce((acc, m) => acc + m.value, 0) /
-                      filteredAndSortedMetrics.length || 0
-                  ).toFixed(1)}
+                <p className="text-sm text-muted-foreground">Ortalama P95</p>
+                <p className="text-3xl font-bold text-[#ffb800] font-data">
+                  {chartStats.avgP95.toFixed(1)}
                 </p>
               </div>
             </div>
           </CardContent>
         </Card>
       </div>
+
+      {/* Chart */}
+      <Card className="bg-card border-border">
+        <CardHeader className="border-b border-border">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-[#00d9ff]" />
+              Metrik Grafiği
+              {selectedType !== 'all' && (
+                <span className="text-sm font-normal text-muted-foreground ml-2">
+                  ({METRIC_TYPE_LABELS[selectedType] || selectedType})
+                </span>
+              )}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-muted-foreground" />
+              <div className="flex gap-1">
+                {TIME_RANGES.map((range) => (
+                  <button
+                    key={range.id}
+                    onClick={() => setTimeRange(range.id)}
+                    className={`px-2.5 py-1 text-xs rounded-md transition-colors ${
+                      timeRange === range.id
+                        ? 'bg-[#00d9ff] text-black font-medium'
+                        : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                    }`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="pt-6">
+          {chartLoading ? (
+            <div className="flex items-center justify-center h-[300px]">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00d9ff]" />
+            </div>
+          ) : processedChartData.length === 0 ? (
+            <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+              Bu zaman aralığında veri bulunamadı
+            </div>
+          ) : selectedType !== 'all' ? (
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={processedChartData}>
+                <defs>
+                  <linearGradient id="colorAvg" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={chartColor} stopOpacity={0.3} />
+                    <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+                  </linearGradient>
+                  <linearGradient id="colorRange" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor={chartColor} stopOpacity={0.1} />
+                    <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                <XAxis
+                  dataKey="time"
+                  stroke="#7d8a9d"
+                  tick={{ fill: '#7d8a9d', fontSize: 11 }}
+                  tickLine={{ stroke: '#30363d' }}
+                />
+                <YAxis
+                  stroke="#7d8a9d"
+                  tick={{ fill: '#7d8a9d', fontSize: 11 }}
+                  tickLine={{ stroke: '#30363d' }}
+                  tickFormatter={(value) => `${value}`}
+                />
+                <Tooltip content={<ChartTooltip />} />
+                {/* Min-Max range area */}
+                <Area
+                  type="monotone"
+                  dataKey="max"
+                  stroke="transparent"
+                  fill="url(#colorRange)"
+                  fillOpacity={1}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="min"
+                  stroke="transparent"
+                  fill="#0d1117"
+                  fillOpacity={1}
+                />
+                {/* P95 line */}
+                <Line
+                  type="monotone"
+                  dataKey="p95"
+                  stroke="#ffb800"
+                  strokeWidth={1}
+                  strokeDasharray="3 3"
+                  dot={false}
+                  name="P95"
+                />
+                {/* Average line */}
+                <Area
+                  type="monotone"
+                  dataKey="avg"
+                  stroke={chartColor}
+                  strokeWidth={2}
+                  fill="url(#colorAvg)"
+                  fillOpacity={1}
+                  name="Ortalama"
+                />
+                <Legend
+                  formatter={(value) => (
+                    <span className="text-xs text-muted-foreground">{value}</span>
+                  )}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={processedChartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#30363d" />
+                <XAxis
+                  dataKey="time"
+                  stroke="#7d8a9d"
+                  tick={{ fill: '#7d8a9d', fontSize: 11 }}
+                  tickLine={{ stroke: '#30363d' }}
+                />
+                <YAxis
+                  stroke="#7d8a9d"
+                  tick={{ fill: '#7d8a9d', fontSize: 11 }}
+                  tickLine={{ stroke: '#30363d' }}
+                />
+                <Tooltip content={<MultiMetricTooltip />} />
+                {activeMetricTypes.map((type) => (
+                  <Line
+                    key={type}
+                    type="monotone"
+                    dataKey={type}
+                    stroke={metricTypeConfig[type]?.color || '#00d9ff'}
+                    strokeWidth={2}
+                    dot={false}
+                    name={METRIC_TYPE_LABELS[type] || type}
+                  />
+                ))}
+                <Legend
+                  formatter={(value) => (
+                    <span className="text-xs text-muted-foreground">{value}</span>
+                  )}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Filters */}
       <Card className="bg-card border-border">
@@ -272,7 +643,7 @@ export default function MetricsPage() {
             <div className="relative flex-1 min-w-[200px] max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Servis veya değer ara..."
+                placeholder="Servis ID veya değer ara..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9 bg-background border-border"
@@ -280,57 +651,48 @@ export default function MetricsPage() {
             </div>
 
             {/* Service Filter */}
-            <div className="flex items-center gap-2">
-              <span className="text-sm text-muted-foreground">Servis:</span>
-              <div className="flex gap-1 flex-wrap">
-                <button
-                  onClick={() => setSelectedService('all')}
-                  className={`filter-chip ${selectedService === 'all' ? 'active' : ''}`}
-                >
-                  Tümü
-                </button>
-                {uniqueServices.map((service) => (
-                  <button
-                    key={service}
-                    onClick={() => setSelectedService(service)}
-                    className={`filter-chip ${selectedService === service ? 'active' : ''}`}
-                  >
-                    {services.find((s) => s.id === service)?.name || service}
-                  </button>
-                ))}
-              </div>
-            </div>
+            <MultiSelect
+              options={uniqueServices}
+              selected={selectedService}
+              onChange={(values) => {
+                setSelectedService(values);
+                setOffset(0);
+              }}
+              placeholder="Servis seçin"
+            />
 
             {/* Metric Type Filter */}
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">Tip:</span>
-              <div className="flex gap-1 flex-wrap">
+              <div className="flex gap-1">
                 <button
-                  onClick={() => setSelectedType('all')}
+                  onClick={() => {
+                    setSelectedType('all');
+                    setOffset(0);
+                  }}
                   className={`filter-chip ${selectedType === 'all' ? 'active' : ''}`}
                 >
                   Tümü
                 </button>
-                {Object.entries(metricTypeConfig).map(([key, config]) => (
+                {Object.entries(METRIC_TYPE_LABELS).map(([type, label]) => (
                   <button
-                    key={key}
-                    onClick={() => setSelectedType(key)}
-                    className={`filter-chip ${selectedType === key ? 'active' : ''}`}
+                    key={type}
+                    onClick={() => {
+                      setSelectedType(type);
+                      setOffset(0);
+                    }}
+                    className={`filter-chip ${selectedType === type ? 'active' : ''}`}
                     style={
-                      selectedType === key
+                      selectedType === type
                         ? {
-                            borderColor: config.color,
-                            color: config.color,
-                            backgroundColor: `${config.color}15`,
+                            borderColor: metricTypeConfig[type]?.color,
+                            color: metricTypeConfig[type]?.color,
+                            backgroundColor: `${metricTypeConfig[type]?.color}15`,
                           }
                         : {}
                     }
                   >
-                    <div
-                      className="w-2 h-2 rounded-full mr-1"
-                      style={{ backgroundColor: config.color }}
-                    />
-                    {METRIC_TYPE_LABELS[key] || formatLabel(key)}
+                    {label}
                   </button>
                 ))}
               </div>
@@ -352,58 +714,7 @@ export default function MetricsPage() {
 
           {hasActiveFilters && (
             <div className="mt-3 text-sm text-muted-foreground">
-              {filteredAndSortedMetrics.length} sonuç gösteriliyor
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Chart */}
-      <Card className="bg-card border-border">
-        <CardHeader className="border-b border-border">
-          <CardTitle className="flex items-center gap-2">
-            <Activity className="w-5 h-5 text-[#00d9ff]" />
-            Metrik Grafiği
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6">
-          {chartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={350}>
-              <AreaChart data={chartData}>
-                <defs>
-                  <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor={chartColor} stopOpacity={0.3} />
-                    <stop offset="95%" stopColor={chartColor} stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="#2a3544" />
-                <XAxis dataKey="time" stroke="#7d8a9d" tick={{ fill: '#7d8a9d', fontSize: 12 }} />
-                <YAxis stroke="#7d8a9d" tick={{ fill: '#7d8a9d', fontSize: 12 }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: '#161d27',
-                    border: '1px solid #2a3544',
-                    borderRadius: '8px',
-                    color: '#e8eaed',
-                  }}
-                  labelStyle={{ color: '#7d8a9d' }}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="value"
-                  stroke={chartColor}
-                  strokeWidth={2}
-                  fillOpacity={1}
-                  fill="url(#colorValue)"
-                />
-              </AreaChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="h-[350px] flex items-center justify-center text-muted-foreground">
-              <div className="text-center">
-                <Activity className="w-12 h-12 mx-auto mb-4 opacity-20" />
-                <p>Veri yok</p>
-              </div>
+              {meta.total} sonuç bulundu
             </div>
           )}
         </CardContent>
@@ -412,93 +723,173 @@ export default function MetricsPage() {
       {/* Table */}
       <Card className="bg-card border-border">
         <CardHeader className="border-b border-border">
-          <CardTitle>Metrik Listesi</CardTitle>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-[#00d9ff]" />
+              Metrik Listesi
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <ColumnSelector
+                columns={COLUMNS}
+                visibleColumns={visibleColumns}
+                onVisibilityChange={setVisibleColumns}
+                storageKey="metrics-visible-columns"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
-          {filteredAndSortedMetrics.length === 0 ? (
+          {loading ? (
+            <div className="flex items-center justify-center h-32">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00d9ff]" />
+            </div>
+          ) : metrics.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <Activity className="w-12 h-12 mx-auto mb-4 opacity-20" />
               <p>Metrik bulunamadı</p>
-              {hasActiveFilters && (
+              {hasActiveFilters ? (
                 <Button variant="link" onClick={clearFilters} className="mt-2 text-[#00d9ff]">
                   Filtreleri temizle
                 </Button>
+              ) : (
+                <p className="text-xs mt-1">Henüz metrik kaydı yok</p>
               )}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('service_id')}
-                  >
-                    <div className="flex items-center">
-                      Servis
-                      <SortIcon field="service_id" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('metric_type')}
-                  >
-                    <div className="flex items-center">
-                      Tip
-                      <SortIcon field="metric_type" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('value')}
-                  >
-                    <div className="flex items-center">
-                      Değer
-                      <SortIcon field="value" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('recorded_at')}
-                  >
-                    <div className="flex items-center">
-                      Tarih
-                      <SortIcon field="recorded_at" />
-                    </div>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAndSortedMetrics.slice(0, 50).map((metric) => {
-                  const config = metricTypeConfig[metric.metric_type];
-                  return (
-                    <TableRow key={metric.id} className="border-border hover:bg-muted/30">
-                      <TableCell className="font-mono text-sm">{metric.service_id}</TableCell>
-                      <TableCell>
-                        <Badge
-                          className="font-medium"
-                          style={{
-                            backgroundColor: `${config?.color || '#00d9ff'}15`,
-                            color: config?.color || '#00d9ff',
-                            border: `1px solid ${config?.color || '#00d9ff'}30`,
-                          }}
-                        >
-                          {METRIC_TYPE_LABELS[metric.metric_type] || formatLabel(metric.metric_type)}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="font-mono text-lg font-medium">
-                        {metric.value.toFixed(2)}
-                        <span className="text-xs text-muted-foreground ml-1">{config?.unit}</span>
-                      </TableCell>
-                      <TableCell className="font-mono text-sm text-soft">
-                        {format(new Date(metric.recorded_at), 'dd MMM HH:mm:ss', {
-                          locale: tr,
-                        })}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-transparent">
+                    {isColumnVisible('service_id') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('service_id')}
+                      >
+                        <div className="flex items-center">
+                          Servis
+                          <SortIcon field="service_id" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('metric_type') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('metric_type')}
+                      >
+                        <div className="flex items-center">
+                          Tip
+                          <SortIcon field="metric_type" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('value') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('value')}
+                      >
+                        <div className="flex items-center">
+                          Değer
+                          <SortIcon field="value" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('recorded_at') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('recorded_at')}
+                      >
+                        <div className="flex items-center">
+                          Tarih
+                          <SortIcon field="recorded_at" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('id') && (
+                      <TableHead className="text-muted-foreground">ID</TableHead>
+                    )}
+                    {isColumnVisible('created_at') && (
+                      <TableHead className="text-muted-foreground">Oluşturulma</TableHead>
+                    )}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {metrics.map((metric) => {
+                    const config = metricTypeConfig[metric.metric_type] || {
+                      color: '#7d8a9d',
+                      unit: '',
+                    };
+                    return (
+                      <TableRow key={metric.id} className="border-border hover:bg-muted/30">
+                        {isColumnVisible('service_id') && (
+                          <TableCell>
+                            <Link
+                              href={`/services/${metric.service_id}`}
+                              className="text-sm text-[#00d9ff] hover:text-[#33e1ff] hover:underline"
+                            >
+                              {services.find((s) => s.id === metric.service_id)?.name ||
+                                metric.service_id}
+                            </Link>
+                          </TableCell>
+                        )}
+                        {isColumnVisible('metric_type') && (
+                          <TableCell>
+                            <span
+                              className="px-2 py-1 rounded-md text-xs font-medium"
+                              style={{
+                                backgroundColor: `${config.color}20`,
+                                color: config.color,
+                              }}
+                            >
+                              {METRIC_TYPE_LABELS[metric.metric_type] ||
+                                formatLabel(metric.metric_type)}
+                            </span>
+                          </TableCell>
+                        )}
+                        {isColumnVisible('value') && (
+                          <TableCell>
+                            <span className="font-mono text-sm">
+                              {metric.value.toFixed(2)}{' '}
+                              <span className="text-muted-foreground">{config.unit}</span>
+                            </span>
+                          </TableCell>
+                        )}
+                        {isColumnVisible('recorded_at') && (
+                          <TableCell className="text-sm text-muted-foreground font-mono">
+                            {format(new Date(metric.recorded_at), 'dd MMM yyyy HH:mm:ss', {
+                              locale: tr,
+                            })}
+                          </TableCell>
+                        )}
+                        {isColumnVisible('id') && (
+                          <TableCell className="text-xs text-muted-foreground font-mono">
+                            {metric.id.slice(0, 8)}...
+                          </TableCell>
+                        )}
+                        {isColumnVisible('created_at') && (
+                          <TableCell className="text-sm text-muted-foreground font-mono">
+                            {format(new Date(metric.created_at), 'dd MMM yyyy HH:mm', {
+                              locale: tr,
+                            })}
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+              <div className="px-4 border-t border-border">
+                <Pagination
+                  total={meta.total}
+                  limit={limit}
+                  offset={offset}
+                  onPageChange={setOffset}
+                  onLimitChange={(newLimit) => {
+                    setLimit(newLimit);
+                    setOffset(0);
+                  }}
+                />
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

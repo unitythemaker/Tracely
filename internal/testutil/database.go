@@ -68,6 +68,8 @@ func CleanupTestData(t *testing.T, pool *pgxpool.Pool) {
 			outbox_processing,
 			outbox,
 			notifications,
+			incident_events,
+			incident_comments,
 			incidents,
 			metrics,
 			quality_rules,

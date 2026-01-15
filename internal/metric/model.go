@@ -8,6 +8,41 @@ import (
 	"github.com/unitythemaker/tracely/pkg/pgutil"
 )
 
+// AggregatedMetricResponse represents a single aggregated time bucket
+type AggregatedMetricResponse struct {
+	Time       time.Time `json:"time"`
+	MetricType string    `json:"metric_type"`
+	Count      int       `json:"count"`
+	Min        float64   `json:"min"`
+	Max        float64   `json:"max"`
+	Avg        float64   `json:"avg"`
+	P50        float64   `json:"p50"`
+	P95        float64   `json:"p95"`
+	P99        float64   `json:"p99"`
+}
+
+func ToAggregatedResponse(row db.GetMetricsAggregatedRow) AggregatedMetricResponse {
+	return AggregatedMetricResponse{
+		Time:       row.BucketTime,
+		MetricType: string(row.MetricType),
+		Count:      int(row.Count),
+		Min:        pgutil.NumericToFloat64(row.MinValue),
+		Max:        pgutil.NumericToFloat64(row.MaxValue),
+		Avg:        row.AvgValue,
+		P50:        row.P50Value,
+		P95:        row.P95Value,
+		P99:        row.P99Value,
+	}
+}
+
+func ToAggregatedResponseList(rows []db.GetMetricsAggregatedRow) []AggregatedMetricResponse {
+	result := make([]AggregatedMetricResponse, len(rows))
+	for i, r := range rows {
+		result[i] = ToAggregatedResponse(r)
+	}
+	return result
+}
+
 type CreateMetricRequest struct {
 	ServiceID  string    `json:"service_id"`
 	MetricType string    `json:"metric_type"`

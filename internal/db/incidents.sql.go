@@ -16,7 +16,7 @@ const closeIncident = `-- name: CloseIncident :one
 UPDATE incidents
 SET status = 'CLOSED', closed_at = NOW()
 WHERE id = $1
-RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at
+RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at
 `
 
 func (q *Queries) CloseIncident(ctx context.Context, id string) (Incident, error) {
@@ -34,8 +34,41 @@ func (q *Queries) CloseIncident(ctx context.Context, id string) (Incident, error
 		&i.ClosedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InProgressAt,
 	)
 	return i, err
+}
+
+const countIncidentsFiltered = `-- name: CountIncidentsFiltered :one
+SELECT COUNT(*)::int FROM incidents
+WHERE
+  ($1::incident_status IS NULL OR status = $1)
+  AND ($2::incident_severity IS NULL OR severity = $2)
+  AND ($3::text IS NULL OR service_id = ANY(string_to_array($3, ',')))
+  AND ($4::text IS NULL OR (
+    id ILIKE '%' || $4 || '%'
+    OR COALESCE(message, '') ILIKE '%' || $4 || '%'
+    OR service_id ILIKE '%' || $4 || '%'
+  ))
+`
+
+type CountIncidentsFilteredParams struct {
+	FilterStatus    NullIncidentStatus   `json:"filter_status"`
+	FilterSeverity  NullIncidentSeverity `json:"filter_severity"`
+	FilterServiceID *string              `json:"filter_service_id"`
+	FilterSearch    *string              `json:"filter_search"`
+}
+
+func (q *Queries) CountIncidentsFiltered(ctx context.Context, arg CountIncidentsFilteredParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countIncidentsFiltered,
+		arg.FilterStatus,
+		arg.FilterSeverity,
+		arg.FilterServiceID,
+		arg.FilterSearch,
+	)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countOpenIncidents = `-- name: CountOpenIncidents :one
@@ -64,7 +97,7 @@ func (q *Queries) CountOpenIncidentsByService(ctx context.Context, serviceID str
 const createIncident = `-- name: CreateIncident :one
 INSERT INTO incidents (id, service_id, rule_id, metric_id, severity, status, message, opened_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at
+RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at
 `
 
 type CreateIncidentParams struct {
@@ -102,12 +135,13 @@ func (q *Queries) CreateIncident(ctx context.Context, arg CreateIncidentParams) 
 		&i.ClosedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InProgressAt,
 	)
 	return i, err
 }
 
 const getIncident = `-- name: GetIncident :one
-SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at FROM incidents WHERE id = $1
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents WHERE id = $1
 `
 
 func (q *Queries) GetIncident(ctx context.Context, id string) (Incident, error) {
@@ -125,12 +159,13 @@ func (q *Queries) GetIncident(ctx context.Context, id string) (Incident, error) 
 		&i.ClosedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InProgressAt,
 	)
 	return i, err
 }
 
 const listIncidents = `-- name: ListIncidents :many
-SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at FROM incidents
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents
 ORDER BY opened_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -161,6 +196,7 @@ func (q *Queries) ListIncidents(ctx context.Context, arg ListIncidentsParams) ([
 			&i.ClosedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InProgressAt,
 		); err != nil {
 			return nil, err
 		}
@@ -173,7 +209,7 @@ func (q *Queries) ListIncidents(ctx context.Context, arg ListIncidentsParams) ([
 }
 
 const listIncidentsByService = `-- name: ListIncidentsByService :many
-SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at FROM incidents
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents
 WHERE service_id = $1
 ORDER BY opened_at DESC
 LIMIT $2 OFFSET $3
@@ -206,6 +242,7 @@ func (q *Queries) ListIncidentsByService(ctx context.Context, arg ListIncidentsB
 			&i.ClosedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InProgressAt,
 		); err != nil {
 			return nil, err
 		}
@@ -218,7 +255,7 @@ func (q *Queries) ListIncidentsByService(ctx context.Context, arg ListIncidentsB
 }
 
 const listIncidentsByStatus = `-- name: ListIncidentsByStatus :many
-SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at FROM incidents
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents
 WHERE status = $1
 ORDER BY opened_at DESC
 LIMIT $2 OFFSET $3
@@ -251,6 +288,86 @@ func (q *Queries) ListIncidentsByStatus(ctx context.Context, arg ListIncidentsBy
 			&i.ClosedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InProgressAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIncidentsFiltered = `-- name: ListIncidentsFiltered :many
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents
+WHERE
+  ($1::incident_status IS NULL OR status = $1)
+  AND ($2::incident_severity IS NULL OR severity = $2)
+  AND ($3::text IS NULL OR service_id = ANY(string_to_array($3, ',')))
+  AND ($4::text IS NULL OR (
+    id ILIKE '%' || $4 || '%'
+    OR COALESCE(message, '') ILIKE '%' || $4 || '%'
+    OR service_id ILIKE '%' || $4 || '%'
+  ))
+ORDER BY
+  CASE WHEN $5::text = 'id' AND $6::text = 'asc' THEN id END ASC,
+  CASE WHEN $5::text = 'id' AND $6::text = 'desc' THEN id END DESC,
+  CASE WHEN $5::text = 'status' AND $6::text = 'asc' THEN status END ASC,
+  CASE WHEN $5::text = 'status' AND $6::text = 'desc' THEN status END DESC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'asc' THEN severity END ASC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'desc' THEN severity END DESC,
+  CASE WHEN $5::text = 'service_id' AND $6::text = 'asc' THEN service_id END ASC,
+  CASE WHEN $5::text = 'service_id' AND $6::text = 'desc' THEN service_id END DESC,
+  CASE WHEN $5::text = 'opened_at' AND $6::text = 'asc' THEN opened_at END ASC,
+  CASE WHEN $5::text = 'opened_at' AND $6::text = 'desc' THEN opened_at END DESC,
+  opened_at DESC
+LIMIT $8 OFFSET $7
+`
+
+type ListIncidentsFilteredParams struct {
+	FilterStatus    NullIncidentStatus   `json:"filter_status"`
+	FilterSeverity  NullIncidentSeverity `json:"filter_severity"`
+	FilterServiceID *string              `json:"filter_service_id"`
+	FilterSearch    *string              `json:"filter_search"`
+	SortBy          string               `json:"sort_by"`
+	SortDir         string               `json:"sort_dir"`
+	OffsetVal       int32                `json:"offset_val"`
+	LimitVal        int32                `json:"limit_val"`
+}
+
+func (q *Queries) ListIncidentsFiltered(ctx context.Context, arg ListIncidentsFilteredParams) ([]Incident, error) {
+	rows, err := q.db.Query(ctx, listIncidentsFiltered,
+		arg.FilterStatus,
+		arg.FilterSeverity,
+		arg.FilterServiceID,
+		arg.FilterSearch,
+		arg.SortBy,
+		arg.SortDir,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Incident{}
+	for rows.Next() {
+		var i Incident
+		if err := rows.Scan(
+			&i.ID,
+			&i.ServiceID,
+			&i.RuleID,
+			&i.MetricID,
+			&i.Severity,
+			&i.Status,
+			&i.Message,
+			&i.OpenedAt,
+			&i.ClosedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.InProgressAt,
 		); err != nil {
 			return nil, err
 		}
@@ -263,7 +380,7 @@ func (q *Queries) ListIncidentsByStatus(ctx context.Context, arg ListIncidentsBy
 }
 
 const listOpenIncidents = `-- name: ListOpenIncidents :many
-SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at FROM incidents
+SELECT id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at FROM incidents
 WHERE status != 'CLOSED'
 ORDER BY severity, opened_at DESC
 LIMIT $1 OFFSET $2
@@ -295,6 +412,7 @@ func (q *Queries) ListOpenIncidents(ctx context.Context, arg ListOpenIncidentsPa
 			&i.ClosedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.InProgressAt,
 		); err != nil {
 			return nil, err
 		}
@@ -317,11 +435,38 @@ func (q *Queries) NextIncidentID(ctx context.Context) (string, error) {
 	return id, err
 }
 
+const setIncidentInProgress = `-- name: SetIncidentInProgress :one
+UPDATE incidents
+SET status = 'IN_PROGRESS', in_progress_at = NOW()
+WHERE id = $1
+RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at
+`
+
+func (q *Queries) SetIncidentInProgress(ctx context.Context, id string) (Incident, error) {
+	row := q.db.QueryRow(ctx, setIncidentInProgress, id)
+	var i Incident
+	err := row.Scan(
+		&i.ID,
+		&i.ServiceID,
+		&i.RuleID,
+		&i.MetricID,
+		&i.Severity,
+		&i.Status,
+		&i.Message,
+		&i.OpenedAt,
+		&i.ClosedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.InProgressAt,
+	)
+	return i, err
+}
+
 const updateIncidentStatus = `-- name: UpdateIncidentStatus :one
 UPDATE incidents
 SET status = $2
 WHERE id = $1
-RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at
+RETURNING id, service_id, rule_id, metric_id, severity, status, message, opened_at, closed_at, created_at, updated_at, in_progress_at
 `
 
 type UpdateIncidentStatusParams struct {
@@ -344,6 +489,7 @@ func (q *Queries) UpdateIncidentStatus(ctx context.Context, arg UpdateIncidentSt
 		&i.ClosedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.InProgressAt,
 	)
 	return i, err
 }

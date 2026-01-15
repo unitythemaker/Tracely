@@ -3,8 +3,10 @@ package rule
 import (
 	"log/slog"
 	"net/http"
+	"strconv"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/unitythemaker/tracely/internal/db"
 	"github.com/unitythemaker/tracely/pkg/httputil"
 	"github.com/unitythemaker/tracely/pkg/pgerror"
 )
@@ -26,13 +28,60 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
-	rules, err := h.repo.List(r.Context())
+	query := r.URL.Query()
+
+	// Pagination
+	limit, _ := strconv.Atoi(query.Get("limit"))
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	offset, _ := strconv.Atoi(query.Get("offset"))
+	if offset < 0 {
+		offset = 0
+	}
+
+	// Sorting
+	sortBy := query.Get("sort_by")
+	if sortBy == "" {
+		sortBy = "priority"
+	}
+	sortDir := query.Get("sort_dir")
+	if sortDir != "asc" && sortDir != "desc" {
+		sortDir = "asc"
+	}
+
+	// Filters
+	params := RuleListFilteredParams{
+		SortBy:  sortBy,
+		SortDir: sortDir,
+		Limit:   int32(limit),
+		Offset:  int32(offset),
+	}
+
+	if metricType := query.Get("metric_type"); metricType != "" {
+		mt := db.MetricType(metricType)
+		params.MetricType = &mt
+	}
+	if severity := query.Get("severity"); severity != "" {
+		s := db.IncidentSeverity(severity)
+		params.Severity = &s
+	}
+	if isActiveStr := query.Get("is_active"); isActiveStr != "" {
+		isActive := isActiveStr == "true"
+		params.IsActive = &isActive
+	}
+	if search := query.Get("search"); search != "" {
+		params.Search = &search
+	}
+
+	rules, total, err := h.repo.ListFiltered(r.Context(), params)
 	if err != nil {
 		slog.Error("failed to list rules", "error", err)
 		httputil.InternalError(w, "failed to list rules")
 		return
 	}
-	httputil.Success(w, ToResponseList(rules))
+
+	httputil.SuccessPaginated(w, ToResponseList(rules), total, limit, offset)
 }
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {

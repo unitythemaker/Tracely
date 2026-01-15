@@ -11,6 +11,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRulesFiltered = `-- name: CountRulesFiltered :one
+SELECT COUNT(*)::int FROM quality_rules
+WHERE
+  ($1::metric_type IS NULL OR metric_type = $1)
+  AND ($2::incident_severity IS NULL OR severity = $2)
+  AND ($3::boolean IS NULL OR is_active = $3)
+  AND ($4::text IS NULL OR (
+    id ILIKE '%' || $4 || '%'
+    OR CAST(threshold AS TEXT) ILIKE '%' || $4 || '%'
+  ))
+`
+
+type CountRulesFilteredParams struct {
+	FilterMetricType NullMetricType       `json:"filter_metric_type"`
+	FilterSeverity   NullIncidentSeverity `json:"filter_severity"`
+	FilterIsActive   *bool                `json:"filter_is_active"`
+	FilterSearch     *string              `json:"filter_search"`
+}
+
+func (q *Queries) CountRulesFiltered(ctx context.Context, arg CountRulesFilteredParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countRulesFiltered,
+		arg.FilterMetricType,
+		arg.FilterSeverity,
+		arg.FilterIsActive,
+		arg.FilterSearch,
+	)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createRule = `-- name: CreateRule :one
 INSERT INTO quality_rules (id, metric_type, threshold, operator, action, priority, severity, is_active)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -166,6 +197,84 @@ SELECT id, metric_type, threshold, operator, action, priority, severity, is_acti
 
 func (q *Queries) ListRules(ctx context.Context) ([]QualityRule, error) {
 	rows, err := q.db.Query(ctx, listRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QualityRule{}
+	for rows.Next() {
+		var i QualityRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.MetricType,
+			&i.Threshold,
+			&i.Operator,
+			&i.Action,
+			&i.Priority,
+			&i.Severity,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRulesFiltered = `-- name: ListRulesFiltered :many
+SELECT id, metric_type, threshold, operator, action, priority, severity, is_active, created_at, updated_at FROM quality_rules
+WHERE
+  ($1::metric_type IS NULL OR metric_type = $1)
+  AND ($2::incident_severity IS NULL OR severity = $2)
+  AND ($3::boolean IS NULL OR is_active = $3)
+  AND ($4::text IS NULL OR (
+    id ILIKE '%' || $4 || '%'
+    OR CAST(threshold AS TEXT) ILIKE '%' || $4 || '%'
+  ))
+ORDER BY
+  CASE WHEN $5::text = 'id' AND $6::text = 'asc' THEN id END ASC,
+  CASE WHEN $5::text = 'id' AND $6::text = 'desc' THEN id END DESC,
+  CASE WHEN $5::text = 'metric_type' AND $6::text = 'asc' THEN metric_type END ASC,
+  CASE WHEN $5::text = 'metric_type' AND $6::text = 'desc' THEN metric_type END DESC,
+  CASE WHEN $5::text = 'threshold' AND $6::text = 'asc' THEN threshold END ASC,
+  CASE WHEN $5::text = 'threshold' AND $6::text = 'desc' THEN threshold END DESC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'asc' THEN severity END ASC,
+  CASE WHEN $5::text = 'severity' AND $6::text = 'desc' THEN severity END DESC,
+  CASE WHEN $5::text = 'priority' AND $6::text = 'asc' THEN priority END ASC,
+  CASE WHEN $5::text = 'priority' AND $6::text = 'desc' THEN priority END DESC,
+  CASE WHEN $5::text = 'is_active' AND $6::text = 'asc' THEN is_active END ASC,
+  CASE WHEN $5::text = 'is_active' AND $6::text = 'desc' THEN is_active END DESC,
+  priority ASC, id ASC
+LIMIT $8 OFFSET $7
+`
+
+type ListRulesFilteredParams struct {
+	FilterMetricType NullMetricType       `json:"filter_metric_type"`
+	FilterSeverity   NullIncidentSeverity `json:"filter_severity"`
+	FilterIsActive   *bool                `json:"filter_is_active"`
+	FilterSearch     *string              `json:"filter_search"`
+	SortBy           string               `json:"sort_by"`
+	SortDir          string               `json:"sort_dir"`
+	OffsetVal        int32                `json:"offset_val"`
+	LimitVal         int32                `json:"limit_val"`
+}
+
+func (q *Queries) ListRulesFiltered(ctx context.Context, arg ListRulesFilteredParams) ([]QualityRule, error) {
+	rows, err := q.db.Query(ctx, listRulesFiltered,
+		arg.FilterMetricType,
+		arg.FilterSeverity,
+		arg.FilterIsActive,
+		arg.FilterSearch,
+		arg.SortBy,
+		arg.SortDir,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
 	if err != nil {
 		return nil, err
 	}

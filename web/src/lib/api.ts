@@ -1,5 +1,26 @@
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080';
 
+// Pagination types
+export interface ListParams {
+  limit?: number;
+  offset?: number;
+  sort_by?: string;
+  sort_dir?: 'asc' | 'desc';
+  search?: string;
+  [key: string]: string | number | boolean | undefined;
+}
+
+export interface PaginationMeta {
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: PaginationMeta;
+}
+
 async function fetchAPI<T>(endpoint: string): Promise<T> {
   const res = await fetch(`${API_BASE}${endpoint}`, {
     cache: 'no-store',
@@ -10,6 +31,30 @@ async function fetchAPI<T>(endpoint: string): Promise<T> {
   }
   const json = await res.json();
   return json.data;
+}
+
+async function fetchPaginatedAPI<T>(endpoint: string, params: ListParams = {}): Promise<PaginatedResponse<T>> {
+  const searchParams = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      searchParams.append(key, String(value));
+    }
+  });
+  const queryString = searchParams.toString();
+  const url = queryString ? `${API_BASE}${endpoint}?${queryString}` : `${API_BASE}${endpoint}`;
+
+  const res = await fetch(url, {
+    cache: 'no-store',
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.message || `API error: ${res.status}`);
+  }
+  const json = await res.json();
+  return {
+    data: json.data,
+    meta: json.meta,
+  };
 }
 
 // Types
@@ -26,6 +71,26 @@ export interface Metric {
   value: number;
   recorded_at: string;
   created_at: string;
+}
+
+export interface AggregatedMetric {
+  time: string;
+  metric_type: string;
+  count: number;
+  min: number;
+  max: number;
+  avg: number;
+  p50: number;
+  p95: number;
+  p99: number;
+}
+
+export interface ChartParams {
+  from?: string;
+  to?: string;
+  service_id?: string;
+  metric_type?: string;
+  bucket?: 'minute' | 'hour' | 'day';
 }
 
 export interface Rule {
@@ -61,9 +126,29 @@ export interface Incident {
   status: string;
   message: string;
   opened_at: string;
+  in_progress_at: string | null;
   closed_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface IncidentComment {
+  id: string;
+  incident_id: string;
+  author: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface IncidentEvent {
+  id: string;
+  incident_id: string;
+  event_type: 'CREATED' | 'STATUS_CHANGED' | 'COMMENT_ADDED' | 'ASSIGNED' | 'SEVERITY_CHANGED';
+  actor: string | null;
+  old_value: string | null;
+  new_value: string | null;
+  created_at: string;
 }
 
 export interface Notification {
@@ -145,13 +230,33 @@ export function formatLabel(value: string): string {
 // API functions
 export const api = {
   // Services
-  getServices: () => fetchAPI<Service[]>('/api/services'),
+  getServices: (params: ListParams = {}) => fetchPaginatedAPI<Service>('/api/services', params),
   getService: (id: string) => fetchAPI<Service>(`/api/services/${id}`),
 
   // Metrics
-  getMetrics: (limit = 50) => fetchAPI<Metric[]>(`/api/metrics?limit=${limit}`),
-  getMetricsByService: (serviceId: string, limit = 50) =>
-    fetchAPI<Metric[]>(`/api/metrics?service_id=${serviceId}&limit=${limit}`),
+  getMetrics: (params: ListParams = {}) => fetchPaginatedAPI<Metric>('/api/metrics', params),
+  getMetricsByService: (serviceId: string, params: ListParams = {}) =>
+    fetchPaginatedAPI<Metric>('/api/metrics', { ...params, service_id: serviceId }),
+  getMetricsChart: async (params: ChartParams = {}): Promise<AggregatedMetric[]> => {
+    const searchParams = new URLSearchParams();
+    Object.entries(params).forEach(([key, value]) => {
+      if (value !== undefined && value !== null && value !== '') {
+        searchParams.append(key, String(value));
+      }
+    });
+    const queryString = searchParams.toString();
+    const url = queryString
+      ? `${API_BASE}/api/metrics/chart?${queryString}`
+      : `${API_BASE}/api/metrics/chart`;
+
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    const json = await res.json();
+    return json.data;
+  },
   createMetric: async (data: { service_id: string; metric_type: string; value: number }) => {
     const res = await fetch(`${API_BASE}/api/metrics`, {
       method: 'POST',
@@ -163,7 +268,7 @@ export const api = {
   },
 
   // Rules
-  getRules: () => fetchAPI<Rule[]>('/api/rules'),
+  getRules: (params: ListParams = {}) => fetchPaginatedAPI<Rule>('/api/rules', params),
   getRule: (id: string) => fetchAPI<Rule>(`/api/rules/${id}`),
   createRule: async (data: CreateRuleInput) => {
     const res = await fetch(`${API_BASE}/api/rules`, {
@@ -201,12 +306,12 @@ export const api = {
   },
 
   // Incidents
-  getIncidents: (limit = 50) => fetchAPI<Incident[]>(`/api/incidents?limit=${limit}`),
+  getIncidents: (params: ListParams = {}) => fetchPaginatedAPI<Incident>('/api/incidents', params),
   getIncident: (id: string) => fetchAPI<Incident>(`/api/incidents/${id}`),
-  getIncidentsByStatus: (status: string, limit = 50) =>
-    fetchAPI<Incident[]>(`/api/incidents?status=${status}&limit=${limit}`),
-  getIncidentsByService: (serviceId: string, limit = 50) =>
-    fetchAPI<Incident[]>(`/api/incidents?service_id=${serviceId}&limit=${limit}`),
+  getIncidentsByStatus: (status: string, params: ListParams = {}) =>
+    fetchPaginatedAPI<Incident>('/api/incidents', { ...params, status }),
+  getIncidentsByService: (serviceId: string, params: ListParams = {}) =>
+    fetchPaginatedAPI<Incident>('/api/incidents', { ...params, service_id: serviceId }),
   updateIncidentStatus: async (id: string, status: string) => {
     const res = await fetch(`${API_BASE}/api/incidents/${id}`, {
       method: 'PATCH',
@@ -219,4 +324,34 @@ export const api = {
     }
     return res.json();
   },
+
+  // Incident Comments
+  getIncidentComments: (incidentId: string) =>
+    fetchAPI<IncidentComment[]>(`/api/incidents/${incidentId}/comments`),
+  createIncidentComment: async (incidentId: string, author: string, content: string) => {
+    const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ author, content }),
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  deleteIncidentComment: async (incidentId: string, commentId: string) => {
+    const res = await fetch(`${API_BASE}/api/incidents/${incidentId}/comments/${commentId}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return true;
+  },
+
+  // Incident Events (Timeline)
+  getIncidentEvents: (incidentId: string) =>
+    fetchAPI<IncidentEvent[]>(`/api/incidents/${incidentId}/events`),
 };

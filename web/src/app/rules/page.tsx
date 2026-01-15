@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,6 +41,8 @@ import {
   METRIC_TYPE_LABELS,
   RULE_ACTION_LABELS,
   formatLabel,
+  ListParams,
+  PaginationMeta,
 } from '@/lib/api';
 import {
   SlidersHorizontal,
@@ -56,6 +58,8 @@ import {
   X,
   Power,
 } from 'lucide-react';
+import { Pagination } from '@/components/ui/pagination';
+import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
 
 const severityColors: Record<string, { color: string; priority: number }> = {
   CRITICAL: { color: '#ff4d6a', priority: 4 },
@@ -78,6 +82,20 @@ const defaultRule: CreateRuleInput = {
 type SortField = 'id' | 'metric_type' | 'threshold' | 'severity' | 'priority' | 'is_active';
 type SortDirection = 'asc' | 'desc';
 
+const COLUMNS: ColumnDefinition[] = [
+  { id: 'id', label: 'ID', defaultVisible: true },
+  { id: 'metric_type', label: 'Metrik', defaultVisible: true },
+  { id: 'condition', label: 'Koşul', defaultVisible: true },
+  { id: 'action', label: 'Aksiyon', defaultVisible: true },
+  { id: 'severity', label: 'Önem', defaultVisible: true },
+  { id: 'priority', label: 'Öncelik', defaultVisible: true },
+  { id: 'is_active', label: 'Durum', defaultVisible: true },
+  { id: 'created_at', label: 'Oluşturulma', defaultVisible: false },
+  { id: 'updated_at', label: 'Güncellenme', defaultVisible: false },
+];
+
+const DEFAULT_VISIBLE_COLUMNS = COLUMNS.filter((c) => c.defaultVisible !== false).map((c) => c.id);
+
 export default function RulesPage() {
   const [rules, setRules] = useState<Rule[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,9 +106,15 @@ export default function RulesPage() {
   const [saving, setSaving] = useState(false);
   const [ruleToDelete, setRuleToDelete] = useState<Rule | null>(null);
   const [toggling, setToggling] = useState<string | null>(null);
+  const [meta, setMeta] = useState<PaginationMeta>({ total: 0, limit: 20, offset: 0 });
+
+  // Stats (total counts regardless of filters)
+  const [totalRules, setTotalRules] = useState(0);
+  const [activeCount, setActiveCount] = useState(0);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [metricFilter, setMetricFilter] = useState<string>('all');
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -99,77 +123,85 @@ export default function RulesPage() {
   const [sortField, setSortField] = useState<SortField>('priority');
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
+  // Pagination
+  const [limit, setLimit] = useState(20);
+  const [offset, setOffset] = useState(0);
+
+  // Column visibility
+  const [visibleColumns, setVisibleColumns] = useState<string[]>(DEFAULT_VISIBLE_COLUMNS);
+
+  // Debounce search
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   useEffect(() => {
-    fetchRules();
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+    searchTimeoutRef.current = setTimeout(() => {
+      setDebouncedSearch(searchQuery);
+      setOffset(0);
+    }, 300);
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [searchQuery]);
+
+  // Fetch stats (total counts)
+  const fetchStats = useCallback(async () => {
+    try {
+      const [allRes, activeRes] = await Promise.all([
+        api.getRules({ limit: 1 }),
+        api.getRules({ limit: 1, is_active: true }),
+      ]);
+      setTotalRules(allRes.meta.total);
+      setActiveCount(activeRes.meta.total);
+    } catch (error) {
+      console.error('Failed to fetch stats:', error);
+    }
   }, []);
 
-  async function fetchRules() {
+  // Fetch rules with filters
+  const fetchRules = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await api.getRules();
-      setRules(data || []);
+      const params: ListParams = {
+        limit,
+        offset,
+        sort_by: sortField,
+        sort_dir: sortDirection,
+      };
+
+      if (metricFilter !== 'all') {
+        params.metric_type = metricFilter;
+      }
+      if (severityFilter !== 'all') {
+        params.severity = severityFilter;
+      }
+      if (statusFilter !== 'all') {
+        params.is_active = statusFilter === 'active';
+      }
+      if (debouncedSearch) {
+        params.search = debouncedSearch;
+      }
+
+      const response = await api.getRules(params);
+      setRules(response.data || []);
+      setMeta(response.meta);
     } catch (error) {
       console.error('Failed to fetch rules:', error);
     } finally {
       setLoading(false);
     }
-  }
+  }, [limit, offset, sortField, sortDirection, metricFilter, severityFilter, statusFilter, debouncedSearch]);
 
-  // Filtering and sorting
-  const filteredAndSortedRules = useMemo(() => {
-    let result = [...rules];
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
-    // Apply filters
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(
-        (r) =>
-          r.id.toLowerCase().includes(query) ||
-          r.metric_type.toLowerCase().includes(query) ||
-          r.action.toLowerCase().includes(query)
-      );
-    }
-    if (metricFilter !== 'all') {
-      result = result.filter((r) => r.metric_type === metricFilter);
-    }
-    if (severityFilter !== 'all') {
-      result = result.filter((r) => r.severity === severityFilter);
-    }
-    if (statusFilter !== 'all') {
-      result = result.filter((r) => (statusFilter === 'active' ? r.is_active : !r.is_active));
-    }
-
-    // Apply sorting
-    result.sort((a, b) => {
-      let comparison = 0;
-
-      switch (sortField) {
-        case 'id':
-          comparison = a.id.localeCompare(b.id);
-          break;
-        case 'metric_type':
-          comparison = a.metric_type.localeCompare(b.metric_type);
-          break;
-        case 'threshold':
-          comparison = a.threshold - b.threshold;
-          break;
-        case 'severity':
-          comparison =
-            (severityColors[a.severity]?.priority || 0) - (severityColors[b.severity]?.priority || 0);
-          break;
-        case 'priority':
-          comparison = a.priority - b.priority;
-          break;
-        case 'is_active':
-          comparison = (a.is_active ? 1 : 0) - (b.is_active ? 1 : 0);
-          break;
-      }
-
-      return sortDirection === 'asc' ? comparison : -comparison;
-    });
-
-    return result;
-  }, [rules, searchQuery, metricFilter, severityFilter, statusFilter, sortField, sortDirection]);
+  useEffect(() => {
+    fetchRules();
+  }, [fetchRules]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -178,6 +210,7 @@ export default function RulesPage() {
       setSortField(field);
       setSortDirection('desc');
     }
+    setOffset(0);
   }
 
   function SortIcon({ field }: { field: SortField }) {
@@ -191,9 +224,11 @@ export default function RulesPage() {
 
   function clearFilters() {
     setSearchQuery('');
+    setDebouncedSearch('');
     setMetricFilter('all');
     setSeverityFilter('all');
     setStatusFilter('all');
+    setOffset(0);
   }
 
   const hasActiveFilters =
@@ -203,7 +238,7 @@ export default function RulesPage() {
     setEditingRule(null);
     setFormData({
       ...defaultRule,
-      id: `QR-${String(rules.length + 1).padStart(2, '0')}`,
+      id: `QR-${String(totalRules + 1).padStart(2, '0')}`,
     });
     setDialogOpen(true);
   }
@@ -237,7 +272,7 @@ export default function RulesPage() {
         await api.createRule(formData);
       }
       setDialogOpen(false);
-      await fetchRules();
+      await Promise.all([fetchRules(), fetchStats()]);
     } catch (error) {
       console.error('Failed to save rule:', error);
       alert('Kural kaydedilemedi: ' + (error as Error).message);
@@ -253,7 +288,7 @@ export default function RulesPage() {
       await api.deleteRule(ruleToDelete.id);
       setDeleteDialogOpen(false);
       setRuleToDelete(null);
-      await fetchRules();
+      await Promise.all([fetchRules(), fetchStats()]);
     } catch (error) {
       console.error('Failed to delete rule:', error);
       alert('Kural silinemedi: ' + (error as Error).message);
@@ -281,6 +316,8 @@ export default function RulesPage() {
         severity: rule.severity,
         is_active: newIsActive,
       });
+      // Update stats
+      setActiveCount((prev) => (newIsActive ? prev + 1 : prev - 1));
     } catch (error) {
       // Revert on error
       setRules((prev) =>
@@ -292,8 +329,11 @@ export default function RulesPage() {
     }
   }
 
-  const activeCount = rules.filter((r) => r.is_active).length;
-  const uniqueMetrics = [...new Set(rules.map((r) => r.metric_type))];
+  // Column visibility check
+  const isColumnVisible = (columnId: string) => visibleColumns.includes(columnId);
+
+  // Get unique metric types from METRIC_TYPES constant
+  const metricTypes = Object.values(METRIC_TYPES);
 
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
@@ -311,13 +351,14 @@ export default function RulesPage() {
             setStatusFilter('all');
             setMetricFilter('all');
             setSeverityFilter('all');
+            setOffset(0);
           }}
         >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Toplam Kural</p>
-                <p className="text-3xl font-bold text-foreground font-data">{rules.length}</p>
+                <p className="text-3xl font-bold text-foreground font-data">{totalRules}</p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-[#00d9ff]/10 flex items-center justify-center">
                 <SlidersHorizontal className="w-6 h-6 text-[#00d9ff]" />
@@ -327,7 +368,10 @@ export default function RulesPage() {
         </Card>
         <Card
           className={`bg-card border-border card-hover cursor-pointer ${statusFilter === 'active' ? 'ring-2 ring-[#10b981]' : ''}`}
-          onClick={() => setStatusFilter(statusFilter === 'active' ? 'all' : 'active')}
+          onClick={() => {
+            setStatusFilter(statusFilter === 'active' ? 'all' : 'active');
+            setOffset(0);
+          }}
         >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
@@ -343,14 +387,17 @@ export default function RulesPage() {
         </Card>
         <Card
           className={`bg-card border-border card-hover cursor-pointer ${statusFilter === 'inactive' ? 'ring-2 ring-[#7d8a9d]' : ''}`}
-          onClick={() => setStatusFilter(statusFilter === 'inactive' ? 'all' : 'inactive')}
+          onClick={() => {
+            setStatusFilter(statusFilter === 'inactive' ? 'all' : 'inactive');
+            setOffset(0);
+          }}
         >
           <CardContent className="pt-6">
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Pasif Kurallar</p>
                 <p className="text-3xl font-bold text-muted-foreground font-data">
-                  {rules.length - activeCount}
+                  {totalRules - activeCount}
                 </p>
               </div>
               <div className="w-12 h-12 rounded-lg bg-muted/50 flex items-center justify-center">
@@ -381,15 +428,21 @@ export default function RulesPage() {
               <span className="text-sm text-muted-foreground">Metrik:</span>
               <div className="flex gap-1 flex-wrap">
                 <button
-                  onClick={() => setMetricFilter('all')}
+                  onClick={() => {
+                    setMetricFilter('all');
+                    setOffset(0);
+                  }}
                   className={`filter-chip ${metricFilter === 'all' ? 'active' : ''}`}
                 >
                   Tümü
                 </button>
-                {uniqueMetrics.map((metric) => (
+                {metricTypes.map((metric) => (
                   <button
                     key={metric}
-                    onClick={() => setMetricFilter(metric)}
+                    onClick={() => {
+                      setMetricFilter(metric);
+                      setOffset(0);
+                    }}
                     className={`filter-chip ${metricFilter === metric ? 'active' : ''}`}
                   >
                     {METRIC_TYPE_LABELS[metric] || formatLabel(metric)}
@@ -405,7 +458,10 @@ export default function RulesPage() {
                 {['all', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((sev) => (
                   <button
                     key={sev}
-                    onClick={() => setSeverityFilter(sev)}
+                    onClick={() => {
+                      setSeverityFilter(sev);
+                      setOffset(0);
+                    }}
                     className={`filter-chip ${severityFilter === sev ? 'active' : ''}`}
                     style={
                       sev !== 'all' && severityFilter === sev
@@ -439,7 +495,7 @@ export default function RulesPage() {
 
           {hasActiveFilters && (
             <div className="mt-3 text-sm text-muted-foreground">
-              {filteredAndSortedRules.length} sonuç gösteriliyor
+              {meta.total} sonuç bulundu
             </div>
           )}
         </CardContent>
@@ -453,10 +509,18 @@ export default function RulesPage() {
               <SlidersHorizontal className="w-5 h-5 text-[#00d9ff]" />
               Kural Listesi
             </CardTitle>
-            <Button className="btn-primary" onClick={openCreateDialog}>
-              <Plus className="w-4 h-4 mr-2" />
-              Yeni Kural
-            </Button>
+            <div className="flex items-center gap-2">
+              <ColumnSelector
+                columns={COLUMNS}
+                visibleColumns={visibleColumns}
+                onVisibilityChange={setVisibleColumns}
+                storageKey="rules-visible-columns"
+              />
+              <Button className="btn-primary" onClick={openCreateDialog}>
+                <Plus className="w-4 h-4 mr-2" />
+                Yeni Kural
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -464,7 +528,7 @@ export default function RulesPage() {
             <div className="flex items-center justify-center h-32">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#00d9ff]" />
             </div>
-          ) : filteredAndSortedRules.length === 0 ? (
+          ) : rules.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
               <SlidersHorizontal className="w-12 h-12 mx-auto mb-4 opacity-20" />
               <p>Kural bulunamadı</p>
@@ -480,157 +544,215 @@ export default function RulesPage() {
               )}
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow className="border-border hover:bg-transparent">
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('id')}
-                  >
-                    <div className="flex items-center">
-                      ID
-                      <SortIcon field="id" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('metric_type')}
-                  >
-                    <div className="flex items-center">
-                      Metrik
-                      <SortIcon field="metric_type" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('threshold')}
-                  >
-                    <div className="flex items-center">
-                      Koşul
-                      <SortIcon field="threshold" />
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-muted-foreground">Aksiyon</TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('severity')}
-                  >
-                    <div className="flex items-center">
-                      Önem
-                      <SortIcon field="severity" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('priority')}
-                  >
-                    <div className="flex items-center">
-                      Öncelik
-                      <SortIcon field="priority" />
-                    </div>
-                  </TableHead>
-                  <TableHead
-                    className="text-muted-foreground cursor-pointer hover:text-foreground"
-                    onClick={() => handleSort('is_active')}
-                  >
-                    <div className="flex items-center">
-                      Durum
-                      <SortIcon field="is_active" />
-                    </div>
-                  </TableHead>
-                  <TableHead className="text-muted-foreground text-right"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredAndSortedRules.map((rule) => (
-                  <TableRow key={rule.id} className="border-border hover:bg-muted/30">
-                    <TableCell className="font-mono text-sm text-[#00d9ff]">{rule.id}</TableCell>
-                    <TableCell>
-                      <Badge variant="outline" className="font-medium">
-                        {METRIC_TYPE_LABELS[rule.metric_type] || formatLabel(rule.metric_type)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono text-sm">
-                      {rule.operator} {rule.threshold}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        className="text-xs font-medium"
-                        style={{
-                          backgroundColor: 'rgba(0, 217, 255, 0.1)',
-                          color: '#00d9ff',
-                          border: '1px solid rgba(0, 217, 255, 0.3)',
-                        }}
+            <>
+              <Table>
+                <TableHeader>
+                  <TableRow className="border-border hover:bg-transparent">
+                    {isColumnVisible('id') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('id')}
                       >
-                        {RULE_ACTION_LABELS[rule.action] || formatLabel(rule.action)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        style={{
-                          backgroundColor: `${severityColors[rule.severity]?.color}15`,
-                          color: severityColors[rule.severity]?.color,
-                          border: `1px solid ${severityColors[rule.severity]?.color}30`,
-                        }}
+                        <div className="flex items-center">
+                          ID
+                          <SortIcon field="id" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('metric_type') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('metric_type')}
                       >
-                        {rule.severity}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="font-mono">{rule.priority}</TableCell>
-                    <TableCell>
-                      {rule.is_active ? (
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
-                          <span className="text-sm text-[#10b981]">Aktif</span>
+                        <div className="flex items-center">
+                          Metrik
+                          <SortIcon field="metric_type" />
                         </div>
-                      ) : (
-                        <div className="flex items-center gap-2">
-                          <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">Pasif</span>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('condition') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('threshold')}
+                      >
+                        <div className="flex items-center">
+                          Koşul
+                          <SortIcon field="threshold" />
                         </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-2">
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          className={rule.is_active
-                            ? "text-[#10b981] hover:text-[#ff4d6a] hover:bg-[#ff4d6a]/10"
-                            : "text-muted-foreground hover:text-[#10b981] hover:bg-[#10b981]/10"
-                          }
-                          onClick={() => toggleActive(rule)}
-                          disabled={toggling === rule.id}
-                          title={rule.is_active ? "Pasif Yap" : "Aktif Yap"}
-                        >
-                          {toggling === rule.id ? (
-                            <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-                          ) : (
-                            <Power className="w-4 h-4" />
-                          )}
-                        </Button>
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          className="text-muted-foreground hover:text-[#00d9ff]"
-                          onClick={() => openEditDialog(rule)}
-                        >
-                          <Pencil className="w-4 h-4" />
-                        </Button>
-                        <Button
-                          size="icon-sm"
-                          variant="ghost"
-                          className="text-muted-foreground hover:text-[#ff4d6a]"
-                          onClick={() => openDeleteDialog(rule)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('action') && (
+                      <TableHead className="text-muted-foreground">Aksiyon</TableHead>
+                    )}
+                    {isColumnVisible('severity') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('severity')}
+                      >
+                        <div className="flex items-center">
+                          Önem
+                          <SortIcon field="severity" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('priority') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('priority')}
+                      >
+                        <div className="flex items-center">
+                          Öncelik
+                          <SortIcon field="priority" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('is_active') && (
+                      <TableHead
+                        className="text-muted-foreground cursor-pointer hover:text-foreground"
+                        onClick={() => handleSort('is_active')}
+                      >
+                        <div className="flex items-center">
+                          Durum
+                          <SortIcon field="is_active" />
+                        </div>
+                      </TableHead>
+                    )}
+                    {isColumnVisible('created_at') && (
+                      <TableHead className="text-muted-foreground">Oluşturulma</TableHead>
+                    )}
+                    {isColumnVisible('updated_at') && (
+                      <TableHead className="text-muted-foreground">Güncellenme</TableHead>
+                    )}
+                    <TableHead className="text-muted-foreground text-right"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rules.map((rule) => (
+                    <TableRow key={rule.id} className="border-border hover:bg-muted/30">
+                      {isColumnVisible('id') && (
+                        <TableCell className="font-mono text-sm text-[#00d9ff]">{rule.id}</TableCell>
+                      )}
+                      {isColumnVisible('metric_type') && (
+                        <TableCell>
+                          <Badge variant="outline" className="font-medium">
+                            {METRIC_TYPE_LABELS[rule.metric_type] || formatLabel(rule.metric_type)}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {isColumnVisible('condition') && (
+                        <TableCell className="font-mono text-sm">
+                          {rule.operator} {rule.threshold}
+                        </TableCell>
+                      )}
+                      {isColumnVisible('action') && (
+                        <TableCell>
+                          <Badge
+                            className="text-xs font-medium"
+                            style={{
+                              backgroundColor: 'rgba(0, 217, 255, 0.1)',
+                              color: '#00d9ff',
+                              border: '1px solid rgba(0, 217, 255, 0.3)',
+                            }}
+                          >
+                            {RULE_ACTION_LABELS[rule.action] || formatLabel(rule.action)}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {isColumnVisible('severity') && (
+                        <TableCell>
+                          <Badge
+                            style={{
+                              backgroundColor: `${severityColors[rule.severity]?.color}15`,
+                              color: severityColors[rule.severity]?.color,
+                              border: `1px solid ${severityColors[rule.severity]?.color}30`,
+                            }}
+                          >
+                            {rule.severity}
+                          </Badge>
+                        </TableCell>
+                      )}
+                      {isColumnVisible('priority') && (
+                        <TableCell className="font-mono">{rule.priority}</TableCell>
+                      )}
+                      {isColumnVisible('is_active') && (
+                        <TableCell>
+                          {rule.is_active ? (
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-[#10b981] status-pulse" />
+                              <span className="text-sm text-[#10b981]">Aktif</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
+                              <span className="text-sm text-muted-foreground">Pasif</span>
+                            </div>
+                          )}
+                        </TableCell>
+                      )}
+                      {isColumnVisible('created_at') && (
+                        <TableCell className="font-mono text-sm text-muted-foreground">
+                          {new Date(rule.created_at).toLocaleDateString('tr-TR')}
+                        </TableCell>
+                      )}
+                      {isColumnVisible('updated_at') && (
+                        <TableCell className="font-mono text-sm text-muted-foreground">
+                          {new Date(rule.updated_at).toLocaleDateString('tr-TR')}
+                        </TableCell>
+                      )}
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            className={rule.is_active
+                              ? "text-[#10b981] hover:text-[#ff4d6a] hover:bg-[#ff4d6a]/10"
+                              : "text-muted-foreground hover:text-[#10b981] hover:bg-[#10b981]/10"
+                            }
+                            onClick={() => toggleActive(rule)}
+                            disabled={toggling === rule.id}
+                            title={rule.is_active ? "Pasif Yap" : "Aktif Yap"}
+                          >
+                            {toggling === rule.id ? (
+                              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <Power className="w-4 h-4" />
+                            )}
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            className="text-muted-foreground hover:text-[#00d9ff]"
+                            onClick={() => openEditDialog(rule)}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            className="text-muted-foreground hover:text-[#ff4d6a]"
+                            onClick={() => openDeleteDialog(rule)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="px-4 border-t border-border">
+                <Pagination
+                  total={meta.total}
+                  limit={limit}
+                  offset={offset}
+                  onPageChange={setOffset}
+                  onLimitChange={(newLimit) => {
+                    setLimit(newLimit);
+                    setOffset(0);
+                  }}
+                />
+              </div>
+            </>
           )}
         </CardContent>
       </Card>

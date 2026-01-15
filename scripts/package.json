@@ -1,0 +1,17 @@
+{
+  "name": "tracely-scripts",
+  "version": "1.0.0",
+  "description": "Seed scripts for Tracely",
+  "scripts": {
+    "seed:quick": "npx ts-node seed-once.ts quick",
+    "seed:medium": "npx ts-node seed-once.ts medium",
+    "seed:large": "npx ts-node seed-once.ts large",
+    "seed:timeseries": "npx ts-node seed-once.ts timeseries",
+    "seed:continuous": "npx ts-node seed-continuous.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.0.0"
+  }
+}

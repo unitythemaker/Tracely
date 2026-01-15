@@ -15,6 +15,17 @@ type SuccessResponse struct {
 	Message string `json:"message,omitempty"`
 }
 
+type PaginationMeta struct {
+	Total  int `json:"total"`
+	Limit  int `json:"limit"`
+	Offset int `json:"offset"`
+}
+
+type PaginatedResponse struct {
+	Data any            `json:"data"`
+	Meta PaginationMeta `json:"meta"`
+}
+
 func JSON(w http.ResponseWriter, status int, data any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -32,6 +43,17 @@ func Error(w http.ResponseWriter, status int, err string, message string) {
 
 func Success(w http.ResponseWriter, data any) {
 	JSON(w, http.StatusOK, SuccessResponse{Data: data})
+}
+
+func SuccessPaginated(w http.ResponseWriter, data any, total, limit, offset int) {
+	JSON(w, http.StatusOK, PaginatedResponse{
+		Data: data,
+		Meta: PaginationMeta{
+			Total:  total,
+			Limit:  limit,
+			Offset: offset,
+		},
+	})
 }
 
 func Created(w http.ResponseWriter, data any) {

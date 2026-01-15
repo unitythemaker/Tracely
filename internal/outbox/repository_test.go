@@ -324,37 +324,93 @@ func TestOutboxRepository_ConcurrentProcessing(t *testing.T) {
 	}
 
 	// Simulate concurrent processor access
-	done := make(chan bool, 2)
-
-	go func() {
-		events, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_a", 10)
-		for _, e := range events {
-			repo.MarkProcessed(ctx, e.ID, "processor_a")
-		}
-		done <- true
-	}()
-
-	go func() {
-		events, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_b", 10)
-		for _, e := range events {
-			repo.MarkProcessed(ctx, e.ID, "processor_b")
-		}
-		done <- true
-	}()
-
-	// Wait for both to complete
-	<-done
-	<-done
-
-	// All events should be processed by both
-	eventsA, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_a", 10)
-	eventsB, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_b", 10)
-
-	if len(eventsA) != 0 {
-		t.Errorf("Expected 0 unprocessed events for processor_a, got %d", len(eventsA))
+	// Note: FOR UPDATE SKIP LOCKED only holds locks during query execution,
+	// so both processors may see the same events. The MarkProcessed uses
+	// ON CONFLICT DO NOTHING to handle this safely.
+	type result struct {
+		processor string
+		count     int
+		err       error
 	}
-	if len(eventsB) != 0 {
-		t.Errorf("Expected 0 unprocessed events for processor_b, got %d", len(eventsB))
+	results := make(chan result, 2)
+
+	go func() {
+		events, err := repo.GetUnprocessedMetricEvents(ctx, "processor_a", 10)
+		if err != nil {
+			results <- result{"processor_a", 0, err}
+			return
+		}
+		for _, e := range events {
+			if err := repo.MarkProcessed(ctx, e.ID, "processor_a"); err != nil {
+				results <- result{"processor_a", 0, err}
+				return
+			}
+		}
+		results <- result{"processor_a", len(events), nil}
+	}()
+
+	go func() {
+		events, err := repo.GetUnprocessedMetricEvents(ctx, "processor_b", 10)
+		if err != nil {
+			results <- result{"processor_b", 0, err}
+			return
+		}
+		for _, e := range events {
+			if err := repo.MarkProcessed(ctx, e.ID, "processor_b"); err != nil {
+				results <- result{"processor_b", 0, err}
+				return
+			}
+		}
+		results <- result{"processor_b", len(events), nil}
+	}()
+
+	// Wait for both to complete and check for errors
+	var totalProcessed int
+	for i := 0; i < 2; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("Processor %s failed: %v", r.processor, r.err)
+		}
+		t.Logf("Processor %s processed %d events in concurrent phase", r.processor, r.count)
+		totalProcessed += r.count
+	}
+
+	// With FOR UPDATE SKIP LOCKED, events are distributed between processors
+	// Total should be at least 5 (all events processed by at least one processor)
+	// Could be more if timing allows both to get some events
+	if totalProcessed < 5 {
+		t.Errorf("Expected at least 5 total events processed, got %d", totalProcessed)
+	}
+
+	// Now do a second pass to ensure both processors have marked all events
+	// This simulates the real-world scenario where processors retry for missed events
+	eventsA, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_a", 10)
+	for _, e := range eventsA {
+		repo.MarkProcessed(ctx, e.ID, "processor_a")
+	}
+	t.Logf("Processor_a marked %d additional events in second pass", len(eventsA))
+
+	eventsB, _ := repo.GetUnprocessedMetricEvents(ctx, "processor_b", 10)
+	for _, e := range eventsB {
+		repo.MarkProcessed(ctx, e.ID, "processor_b")
+	}
+	t.Logf("Processor_b marked %d additional events in second pass", len(eventsB))
+
+	// After second pass, both processors should have processed all events
+	finalA, err := repo.GetUnprocessedMetricEvents(ctx, "processor_a", 10)
+	if err != nil {
+		t.Fatalf("Failed to get final events for processor_a: %v", err)
+	}
+	finalB, err := repo.GetUnprocessedMetricEvents(ctx, "processor_b", 10)
+	if err != nil {
+		t.Fatalf("Failed to get final events for processor_b: %v", err)
+	}
+
+	if len(finalA) != 0 {
+		t.Errorf("Expected 0 unprocessed events for processor_a after second pass, got %d", len(finalA))
+	}
+	if len(finalB) != 0 {
+		t.Errorf("Expected 0 unprocessed events for processor_b after second pass, got %d", len(finalB))
 	}
 }
 
