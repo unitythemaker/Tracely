@@ -9,10 +9,47 @@ import (
 	"context"
 )
 
+const countNotificationsFiltered = `-- name: CountNotificationsFiltered :one
+SELECT COUNT(*) FROM notifications
+WHERE
+  ($1::boolean IS NULL OR is_read = $1)
+  AND ($2::text IS NULL OR incident_id = $2)
+  AND ($3::text IS NULL OR (
+    id ILIKE '%' || $3 || '%'
+    OR message ILIKE '%' || $3 || '%'
+    OR target ILIKE '%' || $3 || '%'
+    OR incident_id ILIKE '%' || $3 || '%'
+  ))
+`
+
+type CountNotificationsFilteredParams struct {
+	FilterIsRead     *bool   `json:"filter_is_read"`
+	FilterIncidentID *string `json:"filter_incident_id"`
+	FilterSearch     *string `json:"filter_search"`
+}
+
+func (q *Queries) CountNotificationsFiltered(ctx context.Context, arg CountNotificationsFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countNotificationsFiltered, arg.FilterIsRead, arg.FilterIncidentID, arg.FilterSearch)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countUnreadNotifications = `-- name: CountUnreadNotifications :one
+SELECT COUNT(*) FROM notifications WHERE is_read = FALSE
+`
+
+func (q *Queries) CountUnreadNotifications(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countUnreadNotifications)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createNotification = `-- name: CreateNotification :one
 INSERT INTO notifications (id, incident_id, target, message)
 VALUES ($1, $2, $3, $4)
-RETURNING id, incident_id, target, message, sent_at, created_at
+RETURNING id, incident_id, target, message, sent_at, created_at, is_read, updated_at
 `
 
 type CreateNotificationParams struct {
@@ -37,12 +74,14 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		&i.Message,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.IsRead,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const getNotification = `-- name: GetNotification :one
-SELECT id, incident_id, target, message, sent_at, created_at FROM notifications WHERE id = $1
+SELECT id, incident_id, target, message, sent_at, created_at, is_read, updated_at FROM notifications WHERE id = $1
 `
 
 func (q *Queries) GetNotification(ctx context.Context, id string) (Notification, error) {
@@ -55,12 +94,14 @@ func (q *Queries) GetNotification(ctx context.Context, id string) (Notification,
 		&i.Message,
 		&i.SentAt,
 		&i.CreatedAt,
+		&i.IsRead,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
 
 const listNotifications = `-- name: ListNotifications :many
-SELECT id, incident_id, target, message, sent_at, created_at FROM notifications
+SELECT id, incident_id, target, message, sent_at, created_at, is_read, updated_at FROM notifications
 ORDER BY sent_at DESC
 LIMIT $1 OFFSET $2
 `
@@ -86,6 +127,8 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 			&i.Message,
 			&i.SentAt,
 			&i.CreatedAt,
+			&i.IsRead,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -98,7 +141,7 @@ func (q *Queries) ListNotifications(ctx context.Context, arg ListNotificationsPa
 }
 
 const listNotificationsByIncident = `-- name: ListNotificationsByIncident :many
-SELECT id, incident_id, target, message, sent_at, created_at FROM notifications
+SELECT id, incident_id, target, message, sent_at, created_at, is_read, updated_at FROM notifications
 WHERE incident_id = $1
 ORDER BY sent_at DESC
 `
@@ -119,6 +162,8 @@ func (q *Queries) ListNotificationsByIncident(ctx context.Context, incidentID st
 			&i.Message,
 			&i.SentAt,
 			&i.CreatedAt,
+			&i.IsRead,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -128,6 +173,134 @@ func (q *Queries) ListNotificationsByIncident(ctx context.Context, incidentID st
 		return nil, err
 	}
 	return items, nil
+}
+
+const listNotificationsFiltered = `-- name: ListNotificationsFiltered :many
+SELECT id, incident_id, target, message, sent_at, created_at, is_read, updated_at FROM notifications
+WHERE
+  ($1::boolean IS NULL OR is_read = $1)
+  AND ($2::text IS NULL OR incident_id = $2)
+  AND ($3::text IS NULL OR (
+    id ILIKE '%' || $3 || '%'
+    OR message ILIKE '%' || $3 || '%'
+    OR target ILIKE '%' || $3 || '%'
+    OR incident_id ILIKE '%' || $3 || '%'
+  ))
+ORDER BY
+  CASE WHEN $4::text = 'id' AND $5::text = 'asc' THEN id END ASC,
+  CASE WHEN $4::text = 'id' AND $5::text = 'desc' THEN id END DESC,
+  CASE WHEN $4::text = 'sent_at' AND $5::text = 'asc' THEN sent_at END ASC,
+  CASE WHEN $4::text = 'sent_at' AND $5::text = 'desc' THEN sent_at END DESC,
+  CASE WHEN $4::text = 'target' AND $5::text = 'asc' THEN target END ASC,
+  CASE WHEN $4::text = 'target' AND $5::text = 'desc' THEN target END DESC,
+  CASE WHEN $4::text = 'is_read' AND $5::text = 'asc' THEN is_read END ASC,
+  CASE WHEN $4::text = 'is_read' AND $5::text = 'desc' THEN is_read END DESC,
+  sent_at DESC, id ASC
+LIMIT $7 OFFSET $6
+`
+
+type ListNotificationsFilteredParams struct {
+	FilterIsRead     *bool   `json:"filter_is_read"`
+	FilterIncidentID *string `json:"filter_incident_id"`
+	FilterSearch     *string `json:"filter_search"`
+	SortBy           string  `json:"sort_by"`
+	SortDir          string  `json:"sort_dir"`
+	OffsetVal        int32   `json:"offset_val"`
+	LimitVal         int32   `json:"limit_val"`
+}
+
+func (q *Queries) ListNotificationsFiltered(ctx context.Context, arg ListNotificationsFilteredParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, listNotificationsFiltered,
+		arg.FilterIsRead,
+		arg.FilterIncidentID,
+		arg.FilterSearch,
+		arg.SortBy,
+		arg.SortDir,
+		arg.OffsetVal,
+		arg.LimitVal,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Notification{}
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.IncidentID,
+			&i.Target,
+			&i.Message,
+			&i.SentAt,
+			&i.CreatedAt,
+			&i.IsRead,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const markAllNotificationsAsRead = `-- name: MarkAllNotificationsAsRead :exec
+UPDATE notifications
+SET is_read = TRUE
+WHERE is_read = FALSE
+`
+
+func (q *Queries) MarkAllNotificationsAsRead(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, markAllNotificationsAsRead)
+	return err
+}
+
+const markNotificationAsRead = `-- name: MarkNotificationAsRead :one
+UPDATE notifications
+SET is_read = TRUE
+WHERE id = $1
+RETURNING id, incident_id, target, message, sent_at, created_at, is_read, updated_at
+`
+
+func (q *Queries) MarkNotificationAsRead(ctx context.Context, id string) (Notification, error) {
+	row := q.db.QueryRow(ctx, markNotificationAsRead, id)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.IncidentID,
+		&i.Target,
+		&i.Message,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.IsRead,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const markNotificationAsUnread = `-- name: MarkNotificationAsUnread :one
+UPDATE notifications
+SET is_read = FALSE
+WHERE id = $1
+RETURNING id, incident_id, target, message, sent_at, created_at, is_read, updated_at
+`
+
+func (q *Queries) MarkNotificationAsUnread(ctx context.Context, id string) (Notification, error) {
+	row := q.db.QueryRow(ctx, markNotificationAsUnread, id)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.IncidentID,
+		&i.Target,
+		&i.Message,
+		&i.SentAt,
+		&i.CreatedAt,
+		&i.IsRead,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const nextNotificationID = `-- name: NextNotificationID :one

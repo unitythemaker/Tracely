@@ -162,8 +162,10 @@ export interface Notification {
   incident_id: string;
   target: string;
   message: string;
+  is_read: boolean;
   sent_at: string;
   created_at: string;
+  updated_at: string;
 }
 
 // Status constants matching backend
@@ -361,4 +363,39 @@ export const api = {
   // Incident Events (Timeline)
   getIncidentEvents: (incidentId: string) =>
     fetchAPI<IncidentEvent[]>(`/api/incidents/${incidentId}/events`),
+
+  // Notifications
+  getNotifications: (params: ListParams = {}) => fetchPaginatedAPI<Notification>('/api/notifications', params),
+  getNotification: (id: string) => fetchAPI<Notification>(`/api/notifications/${id}`),
+  getUnreadNotificationCount: () => fetchAPI<{ count: number }>('/api/notifications/unread-count'),
+  markNotificationAsRead: async (id: string) => {
+    const res = await fetch(`${API_BASE}/api/notifications/${id}/read`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  markNotificationAsUnread: async (id: string) => {
+    const res = await fetch(`${API_BASE}/api/notifications/${id}/unread`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return res.json();
+  },
+  markAllNotificationsAsRead: async () => {
+    const res = await fetch(`${API_BASE}/api/notifications/read-all`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.message || `API error: ${res.status}`);
+    }
+    return true;
+  },
 };

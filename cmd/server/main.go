@@ -92,6 +92,7 @@ func main() {
 	metricHandler := metric.NewHandler(metricRepo)
 	ruleHandler := rule.NewHandler(ruleRepo)
 	incidentHandler := incident.NewHandler(incidentRepo)
+	notificationHandler := notification.NewHandler(notificationRepo)
 
 	// Setup HTTP server
 	mux := http.NewServeMux()
@@ -108,6 +109,7 @@ func main() {
 	metricHandler.RegisterRoutes(mux)
 	ruleHandler.RegisterRoutes(mux)
 	incidentHandler.RegisterRoutes(mux)
+	notificationHandler.RegisterRoutes(mux)
 
 	// Middleware chain: CORS -> Body limit
 	handler := corsMiddleware(cfg.CORSAllowedOrigins, bodyLimitMiddleware(mux))

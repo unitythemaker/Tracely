@@ -11,8 +11,10 @@ type NotificationResponse struct {
 	IncidentID string    `json:"incident_id"`
 	Target     string    `json:"target"`
 	Message    string    `json:"message"`
+	IsRead     bool      `json:"is_read"`
 	SentAt     time.Time `json:"sent_at"`
 	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 func ToResponse(n *db.Notification) NotificationResponse {
@@ -21,8 +23,10 @@ func ToResponse(n *db.Notification) NotificationResponse {
 		IncidentID: n.IncidentID,
 		Target:     n.Target,
 		Message:    n.Message,
+		IsRead:     n.IsRead,
 		SentAt:     n.SentAt,
 		CreatedAt:  n.CreatedAt,
+		UpdatedAt:  n.UpdatedAt,
 	}
 }
 
@@ -32,4 +36,14 @@ func ToResponseList(notifications []db.Notification) []NotificationResponse {
 		result[i] = ToResponse(&n)
 	}
 	return result
+}
+
+type ListFilteredParams struct {
+	IsRead     *bool
+	IncidentID *string
+	Search     *string
+	SortBy     string
+	SortDir    string
+	Limit      int32
+	Offset     int32
 }

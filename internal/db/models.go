@@ -372,6 +372,8 @@ type Notification struct {
 	Message    string    `json:"message"`
 	SentAt     time.Time `json:"sent_at"`
 	CreatedAt  time.Time `json:"created_at"`
+	IsRead     bool      `json:"is_read"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 type Outbox struct {

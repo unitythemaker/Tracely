@@ -9,12 +9,14 @@ import {
   Server,
   Activity,
   SlidersHorizontal,
+  Bell,
   Zap,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: LayoutDashboard },
   { name: 'Olaylar', href: '/incidents', icon: AlertTriangle },
+  { name: 'Bildirimler', href: '/notifications', icon: Bell },
   { name: 'Servisler', href: '/services', icon: Server },
   { name: 'Metrikler', href: '/metrics', icon: Activity },
   { name: 'Kurallar', href: '/rules', icon: SlidersHorizontal },
