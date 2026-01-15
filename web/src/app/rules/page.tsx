@@ -61,6 +61,8 @@ import {
 } from 'lucide-react';
 import { Pagination } from '@/components/ui/pagination';
 import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 
 const severityColors: Record<string, { color: string; priority: number }> = {
   CRITICAL: { color: '#ff4d6a', priority: 4 },
@@ -149,61 +151,84 @@ export default function RulesPage() {
     };
   }, [searchQuery]);
 
-  // Fetch stats (total counts)
-  const fetchStats = useCallback(async () => {
-    try {
-      const [allRes, activeRes] = await Promise.all([
-        api.getRules({ limit: 1 }),
-        api.getRules({ limit: 1, is_active: true }),
-      ]);
-      setTotalRules(allRes.meta.total);
-      setActiveCount(activeRes.meta.total);
-    } catch (error) {
-      console.error('Failed to fetch stats:', error);
-    }
-  }, []);
-
-  // Fetch rules with filters
-  const fetchRules = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: ListParams = {
-        limit,
-        offset,
-        sort_by: sortField,
-        sort_dir: sortDirection,
-      };
-
-      if (metricFilter !== 'all') {
-        params.metric_type = metricFilter;
-      }
-      if (severityFilter !== 'all') {
-        params.severity = severityFilter;
-      }
-      if (statusFilter !== 'all') {
-        params.is_active = statusFilter === 'active';
-      }
-      if (debouncedSearch) {
-        params.search = debouncedSearch;
-      }
-
-      const response = await api.getRules(params);
-      setRules(response.data || []);
-      setMeta(response.meta);
-    } catch (error) {
-      console.error('Failed to fetch rules:', error);
-    } finally {
-      setLoading(false);
-    }
+  // Refs for polling
+  const filtersRef = useRef({ limit, offset, sortField, sortDirection, metricFilter, severityFilter, statusFilter, debouncedSearch });
+  useEffect(() => {
+    filtersRef.current = { limit, offset, sortField, sortDirection, metricFilter, severityFilter, statusFilter, debouncedSearch };
   }, [limit, offset, sortField, sortDirection, metricFilter, severityFilter, statusFilter, debouncedSearch]);
 
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+  // Silent fetch for polling
+  const fetchStatsSilent = useCallback(async () => {
+    const [allRes, activeRes] = await Promise.all([
+      api.getRules({ limit: 1 }),
+      api.getRules({ limit: 1, is_active: true }),
+    ]);
+    setTotalRules(allRes.meta.total);
+    setActiveCount(activeRes.meta.total);
+  }, []);
 
+  const fetchRulesSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const params: ListParams = {
+      limit: f.limit,
+      offset: f.offset,
+      sort_by: f.sortField,
+      sort_dir: f.sortDirection,
+    };
+
+    if (f.metricFilter !== 'all') {
+      params.metric_type = f.metricFilter;
+    }
+    if (f.severityFilter !== 'all') {
+      params.severity = f.severityFilter;
+    }
+    if (f.statusFilter !== 'all') {
+      params.is_active = f.statusFilter === 'active';
+    }
+    if (f.debouncedSearch) {
+      params.search = f.debouncedSearch;
+    }
+
+    const response = await api.getRules(params);
+    setRules(response.data || []);
+    setMeta(response.meta);
+  }, []);
+
+  // Combined fetch for polling
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchRulesSilent(),
+      fetchStatsSilent(),
+    ]);
+  }, [fetchRulesSilent, fetchStatsSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
+
+  // Initial load
   useEffect(() => {
-    fetchRules();
-  }, [fetchRules]);
+    async function initialFetch() {
+      setLoading(true);
+      try {
+        await fetchAllData();
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    initialFetch();
+  }, [fetchAllData]);
+
+  // Refetch when filters change
+  useEffect(() => {
+    if (!loading) {
+      fetchRulesSilent();
+    }
+  }, [limit, offset, sortField, sortDirection, metricFilter, severityFilter, statusFilter, debouncedSearch, loading, fetchRulesSilent]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -274,7 +299,7 @@ export default function RulesPage() {
         await api.createRule(formData);
       }
       setDialogOpen(false);
-      await Promise.all([fetchRules(), fetchStats()]);
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to save rule:', error);
       alert('Kural kaydedilemedi: ' + (error as Error).message);
@@ -290,7 +315,7 @@ export default function RulesPage() {
       await api.deleteRule(ruleToDelete.id);
       setDeleteDialogOpen(false);
       setRuleToDelete(null);
-      await Promise.all([fetchRules(), fetchStats()]);
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to delete rule:', error);
       alert('Kural silinemedi: ' + (error as Error).message);
@@ -340,9 +365,16 @@ export default function RulesPage() {
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Kurallar</h1>
-        <p className="text-muted-foreground mt-1">Kalite kurallarını yönetin</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Kurallar</h1>
+          <p className="text-muted-foreground mt-1">Kalite kurallarını yönetin</p>
+        </div>
+        <RefreshIndicator
+          isRefreshing={isRefreshing}
+          lastUpdated={lastUpdated}
+          onRefresh={refresh}
+        />
       </div>
 
       {/* Stats */}

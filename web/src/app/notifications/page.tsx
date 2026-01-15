@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +17,8 @@ import {
 import { Pagination } from '@/components/ui/pagination';
 import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
 import { api, Notification, ListParams, PaginationMeta } from '@/lib/api';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 import { format } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import {
@@ -93,54 +95,79 @@ export default function NotificationsPage() {
     });
   }
 
-  const fetchNotifications = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: ListParams = {
-        limit,
-        offset,
-        sort_by: sortField,
-        sort_dir: sortDirection,
-      };
-
-      if (readFilter === 'unread') params.is_read = false;
-      if (readFilter === 'read') params.is_read = true;
-      if (searchQuery) params.search = searchQuery;
-
-      const res = await api.getNotifications(params);
-      setNotifications(res.data || []);
-      setMeta(res.meta || { total: 0, limit: 20, offset: 0 });
-    } catch (error) {
-      console.error('Failed to fetch notifications:', error);
-    } finally {
-      setLoading(false);
-    }
+  // Refs for polling
+  const filtersRef = useRef({ limit, offset, sortField, sortDirection, readFilter, searchQuery });
+  useEffect(() => {
+    filtersRef.current = { limit, offset, sortField, sortDirection, readFilter, searchQuery };
   }, [limit, offset, sortField, sortDirection, readFilter, searchQuery]);
 
-  const fetchStats = useCallback(async () => {
-    try {
-      const [allRes, unreadRes, readRes] = await Promise.all([
-        api.getNotifications({ limit: 1 }),
-        api.getNotifications({ limit: 1, is_read: false }),
-        api.getNotifications({ limit: 1, is_read: true }),
-      ]);
-      setStats({
-        total: allRes.meta?.total || 0,
-        unread: unreadRes.meta?.total || 0,
-        read: readRes.meta?.total || 0,
-      });
-    } catch (error) {
-      console.error('Failed to fetch stats:', error);
-    }
+  // Silent fetch for polling
+  const fetchNotificationsSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const params: ListParams = {
+      limit: f.limit,
+      offset: f.offset,
+      sort_by: f.sortField,
+      sort_dir: f.sortDirection,
+    };
+
+    if (f.readFilter === 'unread') params.is_read = false;
+    if (f.readFilter === 'read') params.is_read = true;
+    if (f.searchQuery) params.search = f.searchQuery;
+
+    const res = await api.getNotifications(params);
+    setNotifications(res.data || []);
+    setMeta(res.meta || { total: 0, limit: 20, offset: 0 });
   }, []);
 
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+  const fetchStatsSilent = useCallback(async () => {
+    const [allRes, unreadRes, readRes] = await Promise.all([
+      api.getNotifications({ limit: 1 }),
+      api.getNotifications({ limit: 1, is_read: false }),
+      api.getNotifications({ limit: 1, is_read: true }),
+    ]);
+    setStats({
+      total: allRes.meta?.total || 0,
+      unread: unreadRes.meta?.total || 0,
+      read: readRes.meta?.total || 0,
+    });
+  }, []);
 
+  // Combined fetch for polling
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchNotificationsSilent(),
+      fetchStatsSilent(),
+    ]);
+  }, [fetchNotificationsSilent, fetchStatsSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
+
+  // Initial load
   useEffect(() => {
-    fetchNotifications();
-  }, [fetchNotifications]);
+    async function initialFetch() {
+      setLoading(true);
+      try {
+        await fetchAllData();
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    initialFetch();
+  }, [fetchAllData]);
+
+  // Refetch when filters change
+  useEffect(() => {
+    if (!loading) {
+      fetchNotificationsSilent();
+    }
+  }, [limit, offset, sortField, sortDirection, readFilter, searchQuery, loading, fetchNotificationsSilent]);
 
   // Debounced search
   useEffect(() => {
@@ -155,8 +182,7 @@ export default function NotificationsPage() {
     setUpdating(id);
     try {
       await api.markNotificationAsRead(id);
-      await fetchNotifications();
-      await fetchStats();
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to mark notification as read:', error);
       alert('Bildirim okunamadı: ' + (error as Error).message);
@@ -169,8 +195,7 @@ export default function NotificationsPage() {
     setUpdating(id);
     try {
       await api.markNotificationAsUnread(id);
-      await fetchNotifications();
-      await fetchStats();
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to mark notification as unread:', error);
       alert('Bildirim durumu değiştirilemedi: ' + (error as Error).message);
@@ -183,8 +208,7 @@ export default function NotificationsPage() {
     setUpdating('all');
     try {
       await api.markAllNotificationsAsRead();
-      await fetchNotifications();
-      await fetchStats();
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to mark all notifications as read:', error);
       alert('Bildirimler okunamadı: ' + (error as Error).message);
@@ -229,20 +253,27 @@ export default function NotificationsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Bildirimler</h1>
           <p className="text-muted-foreground mt-1">Sistem bildirimlerini görüntüleyin ve yönetin</p>
         </div>
-        {stats.unread > 0 && (
-          <Button
-            onClick={markAllAsRead}
-            disabled={updating === 'all'}
-            className="btn-outline-cyan"
-          >
-            {updating === 'all' ? (
-              <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
-            ) : (
-              <CheckCheck className="w-4 h-4 mr-2" />
-            )}
-            Tümünü Okundu İşaretle
-          </Button>
-        )}
+        <div className="flex items-center gap-4">
+          <RefreshIndicator
+            isRefreshing={isRefreshing}
+            lastUpdated={lastUpdated}
+            onRefresh={refresh}
+          />
+          {stats.unread > 0 && (
+            <Button
+              onClick={markAllAsRead}
+              disabled={updating === 'all'}
+              className="btn-outline-cyan"
+            >
+              {updating === 'all' ? (
+                <div className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin mr-2" />
+              ) : (
+                <CheckCheck className="w-4 h-4 mr-2" />
+              )}
+              Tümünü Okundu İşaretle
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

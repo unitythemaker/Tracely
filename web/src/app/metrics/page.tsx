@@ -55,6 +55,8 @@ import {
 import { Pagination } from '@/components/ui/pagination';
 import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 
 const metricTypeConfig: Record<string, { color: string; unit: string }> = {
   LATENCY_MS: { color: '#00d9ff', unit: 'ms' },
@@ -226,88 +228,114 @@ export default function MetricsPage() {
     };
   }, [searchQuery]);
 
-  // Fetch services once
+  // Refs for polling
+  const filtersRef = useRef({ limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch, timeRange });
   useEffect(() => {
-    async function fetchServices() {
-      try {
-        const servicesRes = await api.getServices({ limit: 100 });
-        setServices(servicesRes.data || []);
-      } catch (error) {
-        console.error('Failed to fetch services:', error);
-      }
+    filtersRef.current = { limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch, timeRange };
+  }, [limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch, timeRange]);
+
+  // Silent fetch for polling
+  const fetchMetricsSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const params: ListParams = {
+      limit: f.limit,
+      offset: f.offset,
+      sort_by: f.sortField,
+      sort_dir: f.sortDirection,
+    };
+
+    if (f.selectedService.length > 0) {
+      params.service_id = f.selectedService.join(',');
     }
-    fetchServices();
+    if (f.selectedType !== 'all') {
+      params.metric_type = f.selectedType;
+    }
+    if (f.debouncedSearch) {
+      params.search = f.debouncedSearch;
+    }
+
+    const response = await api.getMetrics(params);
+    setMetrics(response.data || []);
+    setMeta(response.meta);
   }, []);
 
-  // Fetch metrics for table (with pagination)
-  const fetchMetrics = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: ListParams = {
-        limit,
-        offset,
-        sort_by: sortField,
-        sort_dir: sortDirection,
-      };
+  const fetchChartDataSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const range = TIME_RANGES.find((r) => r.id === f.timeRange) || TIME_RANGES[3];
+    const now = new Date();
+    const from = range.hours >= 24 * 7
+      ? subDays(now, Math.floor(range.hours / 24))
+      : subHours(now, range.hours);
 
-      if (selectedService.length > 0) {
-        params.service_id = selectedService.join(',');
-      }
-      if (selectedType !== 'all') {
-        params.metric_type = selectedType;
-      }
-      if (debouncedSearch) {
-        params.search = debouncedSearch;
-      }
+    const params: ChartParams = {
+      from: from.toISOString(),
+      to: now.toISOString(),
+    };
 
-      const response = await api.getMetrics(params);
-      setMetrics(response.data || []);
-      setMeta(response.meta);
-    } catch (error) {
-      console.error('Failed to fetch metrics:', error);
-    } finally {
-      setLoading(false);
+    if (f.selectedService.length > 0) {
+      params.service_id = f.selectedService.join(',');
     }
-  }, [limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch]);
-
-  // Fetch aggregated chart data
-  const fetchChartData = useCallback(async () => {
-    setChartLoading(true);
-    try {
-      const range = TIME_RANGES.find((r) => r.id === timeRange) || TIME_RANGES[3];
-      const now = new Date();
-      const from = range.hours >= 24 * 7
-        ? subDays(now, Math.floor(range.hours / 24))
-        : subHours(now, range.hours);
-
-      const params: ChartParams = {
-        from: from.toISOString(),
-        to: now.toISOString(),
-      };
-
-      if (selectedService.length > 0) {
-        params.service_id = selectedService.join(',');
-      }
-      if (selectedType !== 'all') {
-        params.metric_type = selectedType;
-      }
-
-      const data = await api.getMetricsChart(params);
-      setChartData(data || []);
-    } catch (error) {
-      console.error('Failed to fetch chart data:', error);
-    } finally {
-      setChartLoading(false);
+    if (f.selectedType !== 'all') {
+      params.metric_type = f.selectedType;
     }
-  }, [selectedService, selectedType, timeRange]);
 
-  useEffect(() => {
-    fetchMetrics();
-  }, [fetchMetrics]);
+    const data = await api.getMetricsChart(params);
+    setChartData(data || []);
+  }, []);
 
+  const fetchServicesSilent = useCallback(async () => {
+    const servicesRes = await api.getServices({ limit: 100 });
+    setServices(servicesRes.data || []);
+  }, []);
+
+  // Combined fetch for polling
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchMetricsSilent(),
+      fetchChartDataSilent(),
+    ]);
+  }, [fetchMetricsSilent, fetchChartDataSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
+
+  // Initial load
   useEffect(() => {
-    fetchChartData();
-  }, [fetchChartData]);
+    async function initialFetch() {
+      setLoading(true);
+      setChartLoading(true);
+      try {
+        await Promise.all([
+          fetchMetricsSilent(),
+          fetchChartDataSilent(),
+          fetchServicesSilent(),
+        ]);
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+        setChartLoading(false);
+      }
+    }
+    initialFetch();
+  }, [fetchMetricsSilent, fetchChartDataSilent, fetchServicesSilent]);
+
+  // Refetch when filters change
+  useEffect(() => {
+    if (!loading) {
+      fetchMetricsSilent();
+    }
+  }, [limit, offset, sortField, sortDirection, selectedService, selectedType, debouncedSearch, loading, fetchMetricsSilent]);
+
+  // Refetch chart when time range or service/type changes
+  useEffect(() => {
+    if (!loading) {
+      fetchChartDataSilent();
+    }
+  }, [selectedService, selectedType, timeRange, loading, fetchChartDataSilent]);
 
   function handleSort(field: SortField) {
     if (sortField === field) {
@@ -412,6 +440,11 @@ export default function MetricsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Metrikler</h1>
           <p className="text-muted-foreground mt-1">Servis metriklerini inceleyin ve analiz edin</p>
         </div>
+        <RefreshIndicator
+          isRefreshing={isRefreshing}
+          lastUpdated={lastUpdated}
+          onRefresh={refresh}
+        />
       </div>
 
       {/* Stats */}
@@ -562,6 +595,7 @@ export default function MetricsPage() {
                   stroke="transparent"
                   fill="url(#colorRange)"
                   fillOpacity={1}
+                  isAnimationActive={false}
                 />
                 <Area
                   type="monotone"
@@ -569,6 +603,7 @@ export default function MetricsPage() {
                   stroke="transparent"
                   fill="#0d1117"
                   fillOpacity={1}
+                  isAnimationActive={false}
                 />
                 {/* P95 line */}
                 <Line
@@ -579,6 +614,7 @@ export default function MetricsPage() {
                   strokeDasharray="3 3"
                   dot={false}
                   name="P95"
+                  isAnimationActive={false}
                 />
                 {/* Average line */}
                 <Area
@@ -589,6 +625,7 @@ export default function MetricsPage() {
                   fill="url(#colorAvg)"
                   fillOpacity={1}
                   name="Ortalama"
+                  isAnimationActive={false}
                 />
                 <Legend
                   formatter={(value) => (
@@ -622,6 +659,7 @@ export default function MetricsPage() {
                     strokeWidth={2}
                     dot={false}
                     name={METRIC_TYPE_LABELS[type] || type}
+                    isAnimationActive={false}
                   />
                 ))}
                 <Legend

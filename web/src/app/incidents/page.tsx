@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 import {
   Table,
   TableBody,
@@ -93,47 +95,58 @@ export default function IncidentsPage() {
   // Stats (fetched separately without filters)
   const [stats, setStats] = useState({ open: 0, inProgress: 0, closed: 0 });
 
-  const fetchIncidents = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: ListParams = {
-        limit,
-        offset,
-        sort_by: sortField,
-        sort_dir: sortDirection,
-      };
-
-      if (statusFilter !== 'all') params.status = statusFilter;
-      if (severityFilter !== 'all') params.severity = severityFilter;
-      if (serviceFilter.length > 0) params.service_id = serviceFilter.join(',');
-      if (searchQuery) params.search = searchQuery;
-
-      const res = await api.getIncidents(params);
-      setIncidents(res.data || []);
-      setMeta(res.meta || { total: 0, limit: 20, offset: 0 });
-    } catch (error) {
-      console.error('Failed to fetch incidents:', error);
-    } finally {
-      setLoading(false);
-    }
+  // Refs for polling (to access latest filter values)
+  const filtersRef = useRef({ limit, offset, sortField, sortDirection, statusFilter, severityFilter, serviceFilter, searchQuery });
+  useEffect(() => {
+    filtersRef.current = { limit, offset, sortField, sortDirection, statusFilter, severityFilter, serviceFilter, searchQuery };
   }, [limit, offset, sortField, sortDirection, statusFilter, severityFilter, serviceFilter, searchQuery]);
 
-  const fetchStats = useCallback(async () => {
-    try {
-      const [openRes, inProgressRes, closedRes] = await Promise.all([
-        api.getIncidents({ status: 'OPEN', limit: 1 }),
-        api.getIncidents({ status: 'IN_PROGRESS', limit: 1 }),
-        api.getIncidents({ status: 'CLOSED', limit: 1 }),
-      ]);
-      setStats({
-        open: openRes.meta?.total || 0,
-        inProgress: inProgressRes.meta?.total || 0,
-        closed: closedRes.meta?.total || 0,
-      });
-    } catch (error) {
-      console.error('Failed to fetch stats:', error);
-    }
+  // Silent fetch for polling (doesn't set loading)
+  const fetchIncidentsSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const params: ListParams = {
+      limit: f.limit,
+      offset: f.offset,
+      sort_by: f.sortField,
+      sort_dir: f.sortDirection,
+    };
+
+    if (f.statusFilter !== 'all') params.status = f.statusFilter;
+    if (f.severityFilter !== 'all') params.severity = f.severityFilter;
+    if (f.serviceFilter.length > 0) params.service_id = f.serviceFilter.join(',');
+    if (f.searchQuery) params.search = f.searchQuery;
+
+    const res = await api.getIncidents(params);
+    setIncidents(res.data || []);
+    setMeta(res.meta || { total: 0, limit: 20, offset: 0 });
   }, []);
+
+  const fetchStatsSilent = useCallback(async () => {
+    const [openRes, inProgressRes, closedRes] = await Promise.all([
+      api.getIncidents({ status: 'OPEN', limit: 1 }),
+      api.getIncidents({ status: 'IN_PROGRESS', limit: 1 }),
+      api.getIncidents({ status: 'CLOSED', limit: 1 }),
+    ]);
+    setStats({
+      open: openRes.meta?.total || 0,
+      inProgress: inProgressRes.meta?.total || 0,
+      closed: closedRes.meta?.total || 0,
+    });
+  }, []);
+
+  // Combined fetch for polling
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchIncidentsSilent(),
+      fetchStatsSilent(),
+    ]);
+  }, [fetchIncidentsSilent, fetchStatsSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
 
   const fetchServices = useCallback(async () => {
     try {
@@ -144,14 +157,31 @@ export default function IncidentsPage() {
     }
   }, []);
 
+  // Initial load
   useEffect(() => {
-    fetchServices();
-    fetchStats();
-  }, [fetchServices, fetchStats]);
+    async function initialFetch() {
+      setLoading(true);
+      try {
+        await Promise.all([
+          fetchIncidentsSilent(),
+          fetchStatsSilent(),
+          fetchServices(),
+        ]);
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    initialFetch();
+  }, [fetchIncidentsSilent, fetchStatsSilent, fetchServices]);
 
+  // Refetch when filters change
   useEffect(() => {
-    fetchIncidents();
-  }, [fetchIncidents]);
+    if (!loading) {
+      fetchIncidentsSilent();
+    }
+  }, [limit, offset, sortField, sortDirection, statusFilter, severityFilter, serviceFilter, searchQuery, loading, fetchIncidentsSilent]);
 
   // Debounced search
   useEffect(() => {
@@ -166,8 +196,7 @@ export default function IncidentsPage() {
     setUpdating(id);
     try {
       await api.updateIncidentStatus(id, status);
-      await fetchIncidents();
-      await fetchStats();
+      await fetchAllData();
     } catch (error) {
       console.error('Failed to update incident:', error);
       alert('Durum güncellenemedi: ' + (error as Error).message);
@@ -214,6 +243,11 @@ export default function IncidentsPage() {
           <h1 className="text-3xl font-bold tracking-tight">Olaylar</h1>
           <p className="text-muted-foreground mt-1">Servis olaylarını yönetin ve takip edin</p>
         </div>
+        <RefreshIndicator
+          isRefreshing={isRefreshing}
+          lastUpdated={lastUpdated}
+          onRefresh={refresh}
+        />
       </div>
 
       {/* Stats */}

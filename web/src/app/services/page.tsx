@@ -32,6 +32,8 @@ import { format, formatDistanceToNow } from 'date-fns';
 import { tr } from 'date-fns/locale';
 import { Pagination } from '@/components/ui/pagination';
 import { ColumnSelector, ColumnDefinition } from '@/components/ui/column-selector';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 
 type SortField = 'id' | 'name' | 'created_at';
 type SortDirection = 'asc' | 'desc';
@@ -92,49 +94,72 @@ export default function ServicesPage() {
     };
   }, [searchQuery]);
 
-  // Fetch all incidents to calculate service statuses
-  const fetchIncidents = useCallback(async () => {
-    try {
-      const res = await api.getIncidents({ limit: 1000, status: 'OPEN' });
-      setIncidents(res.data || []);
-    } catch (error) {
-      console.error('Failed to fetch incidents:', error);
-    }
-  }, []);
-
-  // Fetch services with filters
-  const fetchServices = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: ListParams = {
-        limit,
-        offset,
-        sort_by: sortField,
-        sort_dir: sortDirection,
-      };
-
-      if (debouncedSearch) {
-        params.search = debouncedSearch;
-      }
-
-      const response = await api.getServices(params);
-      setServices(response.data || []);
-      setMeta(response.meta);
-      setTotalServices(response.meta.total);
-    } catch (error) {
-      console.error('Failed to fetch services:', error);
-    } finally {
-      setLoading(false);
-    }
+  // Refs for polling
+  const filtersRef = useRef({ limit, offset, sortField, sortDirection, debouncedSearch });
+  useEffect(() => {
+    filtersRef.current = { limit, offset, sortField, sortDirection, debouncedSearch };
   }, [limit, offset, sortField, sortDirection, debouncedSearch]);
 
-  useEffect(() => {
-    fetchIncidents();
-  }, [fetchIncidents]);
+  // Silent fetch for polling
+  const fetchIncidentsSilent = useCallback(async () => {
+    const res = await api.getIncidents({ limit: 1000, status: 'OPEN' });
+    setIncidents(res.data || []);
+  }, []);
 
+  const fetchServicesSilent = useCallback(async () => {
+    const f = filtersRef.current;
+    const params: ListParams = {
+      limit: f.limit,
+      offset: f.offset,
+      sort_by: f.sortField,
+      sort_dir: f.sortDirection,
+    };
+
+    if (f.debouncedSearch) {
+      params.search = f.debouncedSearch;
+    }
+
+    const response = await api.getServices(params);
+    setServices(response.data || []);
+    setMeta(response.meta);
+    setTotalServices(response.meta.total);
+  }, []);
+
+  // Combined fetch for polling
+  const fetchAllData = useCallback(async () => {
+    await Promise.all([
+      fetchServicesSilent(),
+      fetchIncidentsSilent(),
+    ]);
+  }, [fetchServicesSilent, fetchIncidentsSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
+
+  // Initial load
   useEffect(() => {
-    fetchServices();
-  }, [fetchServices]);
+    async function initialFetch() {
+      setLoading(true);
+      try {
+        await fetchAllData();
+      } catch (error) {
+        console.error('Failed to fetch data:', error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    initialFetch();
+  }, [fetchAllData]);
+
+  // Refetch when filters change
+  useEffect(() => {
+    if (!loading) {
+      fetchServicesSilent();
+    }
+  }, [limit, offset, sortField, sortDirection, debouncedSearch, loading, fetchServicesSilent]);
 
   // Calculate stats when services or incidents change
   useEffect(() => {
@@ -222,9 +247,16 @@ export default function ServicesPage() {
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Servisler</h1>
-        <p className="text-muted-foreground mt-1">İzlenen servislerin durumu</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Servisler</h1>
+          <p className="text-muted-foreground mt-1">İzlenen servislerin durumu</p>
+        </div>
+        <RefreshIndicator
+          isRefreshing={isRefreshing}
+          lastUpdated={lastUpdated}
+          onRefresh={refresh}
+        />
       </div>
 
       {/* Stats */}

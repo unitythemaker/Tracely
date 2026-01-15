@@ -1,4 +1,4 @@
-.PHONY: dev run build test docker-up docker-down migrate-up migrate-down sqlc tidy
+.PHONY: dev run build datagen test docker-up docker-down migrate-up migrate-down sqlc tidy kill-8080
 
 # Default database URL for local development
 DATABASE_URL ?= postgres://postgres:postgres@localhost:5432/tracely?sslmode=disable
@@ -12,11 +12,19 @@ run: dev
 build:
 	go build -o bin/server ./cmd/server
 
+datagen:
+	go run ./cmd/datagen
+
 test:
 	go test -v ./...
 
 tidy:
 	go mod tidy
+
+kill-8080:
+	@echo "Killing process on port 8080..."
+	@lsof -ti:8080 | xargs -r kill -9 2>/dev/null || true
+	@echo "Port 8080 is now free"
 
 # Docker
 docker-up:
@@ -121,9 +129,11 @@ help:
 	@echo ""
 	@echo "Development:"
 	@echo "  make dev            - Run the Go server"
+	@echo "  make datagen        - Run data generator (random metrics)"
 	@echo "  make build          - Build the Go binary"
 	@echo "  make test           - Run tests"
 	@echo "  make sqlc           - Generate sqlc code"
+	@echo "  make kill-8080      - Kill process running on port 8080"
 	@echo ""
 	@echo "Docker:"
 	@echo "  make docker-up      - Start all Docker services"

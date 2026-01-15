@@ -1,10 +1,12 @@
 'use client';
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { usePolling } from '@/hooks/usePolling';
+import { RefreshIndicator } from '@/components/ui/refresh-indicator';
 import {
   api,
   Service,
@@ -174,16 +176,21 @@ export default function Dashboard() {
 
   // Time range state
   const [selectedTimeRange, setSelectedTimeRange] = useState(3); // Default 24h
+  const selectedTimeRangeRef = useRef(selectedTimeRange);
 
   // Metrics expand state
   const [metricsExpandLevel, setMetricsExpandLevel] = useState(0); // Index in METRICS_EXPAND_LEVELS
 
-  // Fetch chart data with aggregation
-  const fetchChartData = useCallback(async () => {
-    setChartLoading(true);
+  // Keep ref in sync
+  useEffect(() => {
+    selectedTimeRangeRef.current = selectedTimeRange;
+  }, [selectedTimeRange]);
+
+  // Fetch chart data with aggregation (for polling, doesn't set loading)
+  const fetchChartDataSilent = useCallback(async () => {
     try {
       const now = new Date();
-      const hours = TIME_RANGES[selectedTimeRange].hours;
+      const hours = TIME_RANGES[selectedTimeRangeRef.current].hours;
       const from = hours >= 168 ? subDays(now, 7) : subHours(now, hours);
 
       const data = await api.getMetricsChart({
@@ -193,37 +200,54 @@ export default function Dashboard() {
       setChartData(data || []);
     } catch (error) {
       console.error('Failed to fetch chart data:', error);
-    } finally {
-      setChartLoading(false);
     }
-  }, [selectedTimeRange]);
+  }, []);
 
+  // Fetch all data (for polling)
+  const fetchAllData = useCallback(async () => {
+    const [servicesRes, incidentsRes, metricsRes, topRulesRes] = await Promise.all([
+      api.getServices({ limit: 100 }),
+      api.getIncidents({ limit: 20 }),
+      api.getMetrics({ limit: 100, sort_by: 'recorded_at', sort_dir: 'desc' }),
+      api.getTopTriggeredRules(5),
+    ]);
+    setServices(servicesRes.data || []);
+    setIncidents(incidentsRes.data || []);
+    setMetrics(metricsRes.data || []);
+    setMetricsMeta(metricsRes.meta);
+    setTopTriggeredRules(topRulesRes || []);
+    await fetchChartDataSilent();
+  }, [fetchChartDataSilent]);
+
+  // Polling hook
+  const { isRefreshing, lastUpdated, refresh } = usePolling(fetchAllData, {
+    interval: 5000,
+    enabled: !loading,
+  });
+
+  // Initial data fetch with loading state
   useEffect(() => {
-    async function fetchData() {
+    async function initialFetch() {
+      setChartLoading(true);
       try {
-        const [servicesRes, incidentsRes, metricsRes, topRulesRes] = await Promise.all([
-          api.getServices({ limit: 100 }),
-          api.getIncidents({ limit: 20 }),
-          api.getMetrics({ limit: 100, sort_by: 'recorded_at', sort_dir: 'desc' }),
-          api.getTopTriggeredRules(5),
-        ]);
-        setServices(servicesRes.data || []);
-        setIncidents(incidentsRes.data || []);
-        setMetrics(metricsRes.data || []);
-        setMetricsMeta(metricsRes.meta);
-        setTopTriggeredRules(topRulesRes || []);
+        await fetchAllData();
       } catch (error) {
         console.error('Failed to fetch data:', error);
       } finally {
         setLoading(false);
+        setChartLoading(false);
       }
     }
-    fetchData();
-  }, []);
+    initialFetch();
+  }, [fetchAllData]);
 
+  // Refetch chart data when time range changes
   useEffect(() => {
-    fetchChartData();
-  }, [fetchChartData]);
+    if (!loading) {
+      setChartLoading(true);
+      fetchChartDataSilent().finally(() => setChartLoading(false));
+    }
+  }, [selectedTimeRange, loading, fetchChartDataSilent]);
 
   const openIncidents = incidents.filter((i) => i.status === INCIDENT_STATUS.OPEN);
   const criticalIncidents = openIncidents.filter((i) => i.severity === 'CRITICAL');
@@ -305,9 +329,16 @@ export default function Dashboard() {
   return (
     <div className="space-y-6 grid-pattern min-h-screen">
       {/* Header */}
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">Servis kalitesi genel görünümü</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="text-muted-foreground mt-1">Servis kalitesi genel görünümü</p>
+        </div>
+        <RefreshIndicator
+          isRefreshing={isRefreshing}
+          lastUpdated={lastUpdated}
+          onRefresh={refresh}
+        />
       </div>
 
       {/* Stats Cards */}
@@ -445,6 +476,7 @@ export default function Dashboard() {
                         strokeWidth={2}
                         dot={false}
                         name={`${type}_avg`}
+                        isAnimationActive={false}
                       />
                     );
                   })}
